@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.4-beta.5] - 2026-05-06
+
+Fifth beta of the `1.2.4` line. One additive entity slice on top of `beta.4`. No Ajax wire-protocol changes.
+
+### Added
+- **`tilt` and `steam` binary sensors** filling out the device-type matrix. `tilt` (TAMPER device class) is exposed on every DoorProtect Plus variant — `door_protect_plus`, `door_protect_plus_fibra`, `door_protect_s_plus`, `door_protect_plus_g3_fibra` — surfacing the accelerometer's anti-removal status alongside the existing `vibration` (knock) entity, so automations can distinguish the sensor being pried off the wall from someone slamming the door. `steam` (PROBLEM device class) is exposed on every FireProtect 2 variant whose smoke chamber is physically present (`fire_protect_2`, `fire_protect_two`, `fire_protect_two_base`, `fire_protect_two_plus`, `fire_protect_two_plus_sb`, `fire_protect_two_sb`, `fire_protect_two_hcrb`, `fire_protect_two_hcsb`, `fire_protect_two_hs_ac`, `fire_protect_two_hsc_ac` and the matching `*_ul` UL-listed siblings) — chamber-level steam-vs-smoke discriminator that lets automations gate on real smoke instead of firing on shower / cooking steam false positives. Heat-only / CO-only sub-models and `range_extender_2_fire` stay without `steam` because they have no smoke chamber. (#101)
+
+### Internal
+- All 14 translation locales carry the two new `binary_sensor.tilt` / `binary_sensor.steam` strings; technical wording matches the README's binary-sensor inventory in every language.
+
 ## [1.2.4-beta.4] - 2026-05-05
 
 Fourth beta of the `1.2.4` line. Two HA-platform additions on top of `beta.3`. No Ajax wire-protocol changes; both replace silent log lines with first-class HA UX.
