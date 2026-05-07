@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.4-beta.8] - 2026-05-07
+
+Eighth beta of the `1.2.4` line. One bug fix on top of `beta.7`. No Ajax wire-protocol changes.
+
+### Fixed
+- **System Health card no longer renders as `error: unknown`.** The card shipped in `beta.3` (#91) reads `coordinator.last_update_success_time` to render the "last poll" age, but that attribute doesn't exist on HA's `DataUpdateCoordinator` base class — only the `last_update_success` boolean does. Every access raised `AttributeError`, HA caught it generically, and the entire diagnostics row collapsed to a single red `error: unknown` line instead of the eight fields it should show (gRPC reachability, configured accounts, spaces, HTS streams alive, FCM clients alive, pushes received, last push age, last poll age). The unit tests "covered" this path by setting the attribute on a `MagicMock`, which silently created it and let the assertions pass even though the real coordinator never had it. Fix is minimal: `AjaxCobrandedCoordinator` now exposes a `last_update_success_time` property backed by `dt_util.utcnow()` set at the two success-return sites in `_async_update_data`. Failure paths leave it untouched, so "last poll: 2h ago" really means 2h since the last successful poll. Regression tests in `test_coordinator.py` construct the real coordinator class (no MagicMock) and assert the attribute exists, returns `None` pre-poll, advances after a successful update, and stays untouched on failure. (#106, surfaced by @Hansontech190 while triaging #74)
+
 ## [1.2.4-beta.7] - 2026-05-07
 
 Seventh beta of the `1.2.4` line. Finishes a long-standing TODO that ate every device-control click in the integration. No Ajax wire-protocol changes; only fills in the gRPC dispatch that was missing.
