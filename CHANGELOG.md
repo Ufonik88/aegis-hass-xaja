@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.4-beta.9] - 2026-05-07
+
+Ninth beta of the `1.2.4` line. Two bug fixes on top of `beta.8`. No Ajax wire-protocol changes.
+
+### Fixed
+- **Switch / dimmer entities now reflect the actual hub state.** The on/off state of relays, sockets and light switches lives in the repeated `LightHubDevice.spread_properties` field — separate from the `LightDeviceStatus.statuses` oneof the parser already walked — so `device.statuses["switch_chN"]` was never populated and `AjaxSwitch.is_on` always read `False` regardless of what the hub was actually doing. Same path covers `LightSwitchChannel.brightness.level` for the dimmer. Symptom @EpicManeuver hit in #104: a Relay Jeweller in **Pulse** mode looked correct because the hub auto-resets the channel to off after the pulse fires (matching the parser's permanently-False reading), but in **Bistable** mode the bug was visible — toggling worked at the hub yet HA snapped back to off, and toggling the displayed-off / really-on entity did nothing visible. New `_parse_spread_properties` translates `channel` (RelayChannel), `light_switch_channel` (LightSwitchChannel — multi-gang devices arrive as multiple entries, both populate, plus optional brightness) and `socket_base_channel` (SocketBaseChannel) entries into the existing `switch_chN` / `brightness_chN` keys the entity layer already reads, so a hub-side state change for a relay / socket / light switch propagates through the next snapshot or `snapshot_update` real-time event without any further changes to the entity classes. (#109)
+- **System Health card no longer shows a misleading `Reach Ajax cloud (gRPC host): unreachable`** when polling is healthy. The card was probing the gRPC host with plain HTTPS HEAD/GET via `system_health.async_check_can_reach_url`, but the Ajax gRPC endpoint doesn't respond to plain HTTPS — so the probe always returned "unreachable" even when the integration was polling the same host successfully through the actual gRPC channel. The bug only became visible after `beta.8` made the rest of the card render at all (#106). Reachability now comes from the data the card already has: any account that polled successfully within the last 10 min means the cloud is reachable from the integration's perspective. The four possible values are `reachable` (a recent successful poll exists), `unreachable` (every account's last successful poll is older), `never polled` (fresh setup, no cycle completed yet) and `no accounts configured` (empty install). (#110, surfaced by @Hansontech190 in #74)
+
+### Internal
+- The `last_update_success_time` exposed on the coordinator in `beta.8` is now load-bearing for the System Health reachability derivation, not just a display value — covered by additional regression tests so a future regression on either side fails loudly.
+
 ## [1.2.4-beta.8] - 2026-05-07
 
 Eighth beta of the `1.2.4` line. One bug fix on top of `beta.7`. No Ajax wire-protocol changes.
