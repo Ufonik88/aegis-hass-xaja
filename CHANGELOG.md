@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.4-beta.10] - 2026-05-08
+
+Tenth beta of the `1.2.4` line. One performance fix on top of `beta.9`. No Ajax wire-protocol changes.
+
+### Fixed
+- **Boot-time UX no longer trips HA's *"integration taking too long"* warning.** The first `_async_update_data` cycle was awaiting two multi-second listener startups inline — the HTS handshake (TCP connect + custom application handshake, up to 20 s with the `bb5567e` timeout from #74) and the FCM round-trip (Firebase register → Ajax push token register → start `FcmPushClient`). On a real install with both configured, that pushed the integration's setup phase past the boot threshold (~70 s end-to-end), making HA log *"Something is blocking Home Assistant from wrapping up the start up phase"* with `aegis_ajax` in the pending tasks. Two changes mirror the standard HA-premium pattern of "minimum viable first refresh, long-lived listeners on background tasks": `_start_hts()` now wraps connect-then-listen into a single background task instead of awaiting connect inline (hub-network sensors stay `unavailable` for the few seconds the handshake takes, then become available the moment it succeeds — self-reconnect logic on failure is unchanged), and `async_start_push_notifications()` is dispatched via `entry.async_create_background_task` instead of being awaited from `async_setup_entry` (push delivery already tolerates a brief gap between setup and first push). The critical path (login + `list_spaces` + `get_devices_snapshot`) stays synchronous because platforms need the device dict populated before they can register entities. (#113, closes #112)
+
 ## [1.2.4-beta.9] - 2026-05-07
 
 Ninth beta of the `1.2.4` line. Two bug fixes on top of `beta.8`. No Ajax wire-protocol changes.
