@@ -26,6 +26,7 @@ Prioritized list of remaining improvements based on HA platinum integration patt
 - ~~Switch state read-back~~ (v1.2.4) — `parse_device` now walks `LightHubDevice.spread_properties` for `RelayChannel` / `LightSwitchChannel` / `SocketBaseChannel` so `AjaxSwitch.is_on` reflects the actual hub state. Fixes the bistable Relay Jeweller symptom where the entity always read `False`. (#109)
 - ~~System Health diagnostics~~ (v1.2.4) — `last_update_success_time` exposed on the coordinator so the card stops rendering as `error: unknown` (#106); `Reach Ajax cloud (gRPC host)` derived from poll freshness instead of an HTTPS HEAD probe that always returned `unreachable` (#110)
 - ~~Non-blocking startup~~ (v1.2.4) — HTS connect-then-listen and FCM startup move to background tasks; first refresh no longer awaits multi-second listener startups so the integration drops out of HA's *"integration taking too long"* warning much sooner (#113, closes #112)
+- ~~Cached-snapshot warm start~~ (v1.2.4) — first `_async_update_data` warm-starts `coordinator.devices` from a per-entry `Store`-backed cache and skips the synchronous `get_devices_snapshot` loop on subsequent boots; persistent streams deliver fresh data within seconds. Cache writes from the stream callback go through `Store.async_delay_save` (30 s window) to coalesce bursts. Real-HA measurement: ~10 s shaved off HA total boot, ~9 s off aegis_ajax setup-to-platforms-online (#116, closes #114)
 
 ---
 
@@ -34,7 +35,7 @@ Prioritized list of remaining improvements based on HA platinum integration patt
 ### 1.1 Valve Platform (`valve.py`) — partially unblocked
 **Why:** WaterStop devices currently surface as a no-op (empty binary-sensor list). Native `valve` entity would let automations open/close the water shut-off valve.
 
-**Status after #109 (1.2.4-beta.9):** the `spread_properties` walker added for switch state already covers `WaterStopChannel.state` mechanically — extending it to populate a `valve_chN` key would be a one-liner. The remaining blocker is the **command path**: there is no `SwitchWaterStopService` in the v3 protos we have, so the entity would be read-only. Useful (status visibility + transition flag), but not the full valve UX.
+**Status after #109 (1.2.4):** the `spread_properties` walker added for switch state already covers `WaterStopChannel.state` mechanically — extending it to populate a `valve_chN` key would be a one-liner. The remaining blocker is the **command path**: there is no `SwitchWaterStopService` in the v3 protos we have, so the entity would be read-only. Useful (status visibility + transition flag), but not the full valve UX.
 
 **Suggested incremental ship:**
 1. Read-only `valve` entity — exposes `state` (STATE_OFF / STATE_ON), `is_transitioning`, and the `MALFUNCTION_IS_STUCK` flag as the existing `water_stop_valve_stuck` binary sensor. Lets automations *react* to the valve being closed even if HA can't toggle it.

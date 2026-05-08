@@ -339,8 +339,7 @@ If a specific group of sensors stops working:
 ## Roadmap
 
 - [ ] Video stream support (VideoEdge, RTSP)
-- [ ] Smart lock support (LockBridge)
-- [ ] Valve platform (WaterStop)
+- [ ] Valve platform (WaterStop) — read-only `valve` entity is unblocked (the `spread_properties` walker added in `1.2.4` already exposes `WaterStopChannel.state`); full bidirectional control still waits on capturing the official app's command-side calls
 - [ ] Firmware update platform
 - [ ] Number/Select platforms for device settings (sensitivity, brightness)
 - [ ] SpaceControl (keyfob) event support
