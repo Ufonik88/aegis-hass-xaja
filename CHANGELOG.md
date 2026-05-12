@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0-beta.6] - 2026-05-13
+
+Sixth beta of the `1.3.0` line. Regression fix on top of `beta.5`. No Ajax wire-protocol changes.
+
+### Fixed
+- **MotionCam Video Doorbell no longer crashes the device stream in a reconnect loop.** Adding `_parse_video_edge_channel` in `beta.5` (#124) exposed a pre-existing bug in `_parse_statuses`: the `wifi_signal_level_status` branch was reading `int(status.wifi_signal_level_status)` but that field is a sub-message wrapping the actual `wifi_signal_level` enum, not a plain int. `hub_device` devices on most installs didn't surface that status, so the bug stayed dormant; `video_edge_channel` devices (like @Permudious's doorbell) do emit it, and the resulting `TypeError` killed the device-stream task on every reconnect cycle. Read the int from the nested `.wifi_signal_level` field at both call sites (snapshot parser + persistent stream handler). The previous unit test used `MagicMock` with `status.wifi_signal_level_status = 4` and silently let the buggy `int(...)` pass — replaced with a real `LightDeviceStatus` proto so this class of regression stays caught. (#125, surfaced by @Permudious in #119)
+
 ## [1.3.0-beta.5] - 2026-05-12
 
 Fifth beta of the `1.3.0` line. Real fix for the doorbell device-card on top of `beta.4`. No Ajax wire-protocol changes.
