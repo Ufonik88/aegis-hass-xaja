@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0-beta.7] - 2026-05-13
+
+Seventh beta of the `1.3.0` line. Hardening pass on top of `beta.6`. No Ajax wire-protocol changes; no entity-level behaviour change for healthy installs.
+
+### Fixed
+- **A single bad device or status update no longer kills the device stream.** Before this beta, a parse exception on one `LightDevice` (or one update inside the `updates` batch) bubbled out of the stream's `async for` loop, hit the outer `except Exception` and put the task into the same exponential-backoff reconnect cycle @Permudious saw 21× in a row before #119 surfaced. The per-device `parse_device` call and the per-update handler are now each wrapped in `try/except`: the offender is logged at WARNING with `exc_info=True` so the device id and full traceback land in the logs without needing DEBUG, and the rest of the snapshot / update batch flows through normally. Same defence applies to `snapshot_update` events inside `Updates`. The per-update payload-build was extracted into `DevicesApi._handle_update` so the wrap is a one-line guard at the call site. (#126, follow-up to #119)
+
+### Internal
+- `_parse_statuses` unit tests rewritten to use real `LightDeviceStatus` proto instances instead of `MagicMock` across every sub-message branch (`signal_strength`, `gsm_status`, `sim_status`, `monitoring`, `life_quality`, `temperature`, `wire_input_status`, `transmitter_status`, `smart_lock`, `nfc`, `motion_detected`, `battery`). The MagicMock pattern that masked the original `int(sub_message)` bug in `beta.5` is gone for the high-risk branches; no new latent shape bugs surfaced during the conversion. (#126)
+- New `TestSnapshotReplay` exercises the full snapshot path end-to-end: it builds a multi-device `StreamLightDevicesResponse` (including the #119 `wifi_signal_level_status` shape on a `video_edge_channel`), serialises to wire bytes, deserialises through the real proto, and replays through `start_device_stream`. A companion auto-replay loop iterates every `tests/fixtures/*.bin` — currently empty, ready for the first user-supplied capture — so future regressions on real-fleet shapes fail loudly in CI instead of waiting for a user beta. Capture/sanitisation instructions in `tests/fixtures/README.md`. (#126)
+
 ## [1.3.0-beta.6] - 2026-05-13
 
 Sixth beta of the `1.3.0` line. Regression fix on top of `beta.5`. No Ajax wire-protocol changes.
