@@ -25,11 +25,12 @@ Ajax Systems provides co-branded versions of their mobile app to security compan
 - **Binary Sensors**: Door open/close, motion detection, smoke, steam (FireProtect 2 chamber discriminator), leak, tamper, CO, heat, glass break, vibration, tilt (DoorProtect Plus accelerometer), CRA monitoring status, cellular connection, lid tamper, external contact alert (wired reed switches on DoorProtect/Hub Hybrid inputs), external contact fault, MultiTransmitter wired-input alert with alarm category, anti-masking, interference detection, ethernet link, Wi-Fi link, mains power
 - **Hub Network**: Real-time hub network data — ethernet/wifi/gsm connection status, Wi-Fi SSID and signal strength, IP addressing, cellular signal strength and network type, power supply status
 - **Sensors**: Battery level, temperature, humidity, CO2, signal strength, GSM type (2G/3G/4G), Wi-Fi signal level, Wi-Fi SSID, Wi-Fi IP, IMEI, Ethernet IP/gateway/DNS, cellular signal/network, connection type
-- **Electrical readings** for WallSwitch / Socket family devices: live current draw (A), cumulative electric energy consumed (kWh, wired into HA's Energy dashboard via `state_class=total_increasing`), and derived instantaneous power (W, opt-in, derived from nominal grid voltage × current — mirrors what the official Ajax app shows). Updates arrive on the hub's push channel (HTS `STATUS_UPDATE`), so the entities feel live with no client-side polling.
+- **Electrical readings** for WallSwitch / Socket family devices: live current draw (A), measured line voltage (V) when the firmware reports it, cumulative electric energy consumed (kWh, wired into HA's Energy dashboard via `state_class=total_increasing`), and derived instantaneous power (W, opt-in, `current × measured voltage` when available — falls back to a nominal 230 V baseline for firmwares that don't expose voltage). Updates arrive on the hub's push channel, so the entities feel live with no client-side polling. The four sensors also persist across HA restarts (so a constant load like a fixed-speed pump doesn't render as `unknown` after a reboot until the next state change).
 - **Switches**: Relays, wall switches, sockets (multi-channel support) — turn on/off via `DeviceCommandDeviceOn` / `DeviceCommandDeviceOff` gRPC services
 - **Lights**: Dimmers with absolute brightness control via `DeviceCommandBrightness`
 - **Locks**: Ajax SmartLock and LockBridge (Yale) — lock, unlock, and unlatch (HA's `lock.open`) via `SwitchSmartLockService`
 - **Valves** (read-only): Ajax WaterStop and WaterStop Fibra surface as native `valve.*` entities reflecting `WaterStopChannel.state` (open / closed), `is_transitioning`, and a `stuck` attribute pulled from the channel-level `MALFUNCTION_IS_STUCK`. Bidirectional control waits on capturing the official app's command-side calls — file an issue with a packet capture if you have a WaterStop and we'll wire the open / close path
+- **Hub firmware update** (read-only): each hub exposes an `update.<hub>_firmware` entity that shows whether Ajax has queued a firmware update for the hub, with download progress when the cloud is pushing bytes. No install button is exposed on purpose — firmware updates remain Ajax-scheduled and the entity is informational. Click the entity for a short explainer of what "Up-to-date" actually means here.
 - **Cameras**: MotionCam Photo on Demand — capture photos and view them in HA (PhOD models only)
 - **Photo Storage**: Captured photos saved to `/media/ajax_photos/` with timestamp overlay, configurable retention
 - **Media Browser**: Browse captured photos per device via HA Media Browser
@@ -154,7 +155,8 @@ You can type any custom label during setup if yours is not listed.
 | Combi | CombiProtect, CombiProtect S, CombiProtect Fibra | Motion, glass break, tamper, battery |
 | Fire/Smoke | FireProtect, FireProtect Plus, FireProtect 2 (all sub-models — heat-only `*hrb`/`*hsb`, CO-only `*crb`/`*csb`, multi-sensor `*hcrb`/`*hcsb`, AC-powered `*_ac`, UL-listed `*_ul`) | Smoke, steam (FireProtect 2 only — chamber discriminator), CO, high temperature, tamper, battery — sub-models without a given sensor expose only the relevant entity |
 | Water Leak | LeaksProtect | Leak detected, tamper, battery |
-| Relays/Switches | Relay, WallSwitch, Socket, LightSwitch | On/off per channel |
+| Relays/Switches | Relay, WallSwitch, Socket (and outlet variants) | On/off per channel; electrical readings (current, voltage, energy, derived power) on WallSwitch / Socket family |
+| Light switches | LightSwitch (Jeweller / Fibra) | On/off per channel |
 | Lights | LightSwitch Dimmer | Brightness control |
 | Locks | SmartLock, LockBridge (Yale) | Lock, unlock, unlatch (HA `lock.open` → momentary unlatch). State surfaces locked / unlocked / unlatched |
 | Keypads | Keypad, KeypadPlus, KeypadCombi, KeypadTouchscreen | Battery, tamper, temperature, signal, NFC status |
@@ -342,7 +344,7 @@ If a specific group of sensors stops working:
 
 - [ ] Video stream support (VideoEdge, RTSP)
 - [ ] Valve platform — bidirectional control. Read-only `valve` entity ships in `1.3.0`; full open / close still waits on capturing the official app's command-side calls (no `SwitchWaterStopService` in the v3 protos)
-- [ ] Firmware update platform
+- [ ] Per-device firmware update entities. Hub-level entity ships in `1.4.0` via `streamHubObject` field 201; field 200 (`device_firmware_updates`) carries the same shape per device for the per-device entities, same read-only-by-design pattern
 - [ ] Number/Select platforms for device settings (sensitivity, brightness)
 - [ ] SpaceControl (keyfob) event support
 
