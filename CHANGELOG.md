@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0-beta.5] - 2026-05-17
+
+Adds a read-only firmware update entity for each Ajax hub. One entity per hub, **no install button** — the integration never triggers a firmware update from HA. Bringing the integration to **11 HA platforms**.
+
+### Added
+- **`update.<hub>_firmware` entity per hub.** Surfaces the pending hub firmware update Ajax has queued: shows the target version with a download progress indicator while the cloud is pushing bytes, renders as "up to date" when no update is pending. **Read-only on purpose** — no install feature is declared and `async_install` is not implemented, so HA renders no install button at all. Firmware updates remain Ajax-scheduled and Ajax-triggered; this entity is informational. The current installed version is not exposed by the Ajax stream, so HA renders the entity as "<latest> available" with progress when an update is in flight. Translations in all 14 locales. (#142)
+
 ## [1.4.0-beta.4] - 2026-05-17
 
 Follow-up to `1.4.0-beta.2`: the previous fix for clearing FCM credentials in the options form was incomplete. Hansontech190 reported on #138 that on beta.3 the credentials still re-appear, with the extra clue that the API Key field "shows the original key in grey" when cleared — the password field can't be reliably emptied through the UI. The persistence handler was correct; the form schema was the problem.
