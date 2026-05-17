@@ -38,18 +38,13 @@ Prioritized list of remaining improvements based on HA platinum integration patt
 
 ## Priority 1 — High impact, moderate effort
 
-### 1.0 Don't clear `device_readings` on HTS disconnect (`1.4.1` patch — #146)
-**Why:** During a transient HTS reconnect cycle (5-min outage on bvis-home is canonical), the four electrical-reading sensors render `unavailable` because `coordinator._handle_hts_disconnect()` calls `self.device_readings.clear()`. Hub remembers device state across our socket outages, so the cached value remains the truth until proven otherwise by a fresh delta.
-
-**Fix:** one-line change — drop `device_readings.clear()` from the disconnect handler, keep `hub_network.clear()` (hub-network entities accurately reflect "we don't know" during an outage). Plus rename the regression test and add a new one asserting the entity stays available with its cached value. See [[feedback_restore_sensor_for_change_only_streams]] for the broader split-on-disconnect pattern.
-
-**Effort:** 1-2 h including tests. Pure bug fix, no new functionality — SemVer PATCH (`1.4.1`).
+- ~~Preserve HTS-cached state on transient reconnects~~ (`1.4.1`) — `_handle_hts_disconnect` no longer wipes `device_readings` or `hub_network`. The four electrical-reading sensors plus the diagnostic hub-network sensors (IP, SSID, DNS, signal level, ethernet/wifi/gsm channel flags) keep rendering the last value through the dropout and refresh in place on the next delta. `binary_sensor.<hub>_alimentacion_externa` is the deliberate exception: it ANDs `available` with the new `coordinator.is_hts_alive` property so a real hub-power loss during the outage isn't silenced by a cached `on` snapshot. Scope expanded from the original one-liner after the symmetry argument — the hub remembers its own network state across our socket outage the same way it remembers per-device readings (#146).
 
 **Per-device firmware** (was P2.1): Hub-level firmware update entity shipped in `1.4.0-beta.5`. The same `streamHubObject` snapshot also exposes per-device firmware updates (field 200 `DeviceFirmwareUpdates`). Promoted to P2 below.
 
 ---
 
-### 1.1 Valve Platform (`valve.py`) — bidirectional control
+### 1.0 Valve Platform (`valve.py`) — bidirectional control
 **Why:** Read-only valve entity shipped in `1.3.0` (#117). The remaining gap is **opening / closing the valve from HA** — automations can react to the valve being closed by a leak, but can't trigger the shut-off themselves nor reopen after a false-positive.
 
 **Status:** Blocked on protocol capture. There is no `SwitchWaterStopService` in the v3 protos we have. Need someone with a WaterStop to run the rig (Frida + mitmproxy on the official mobile app) and capture the gRPC call the app makes when toggling the valve from its UI.

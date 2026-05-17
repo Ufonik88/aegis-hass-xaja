@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-05-18
+
+Patch release. The transient HTS reconnect cycle (typically ~5 min on busy installs, multiple times per day) no longer blanks HTS-cached sensors to `unavailable`. Hub-cached state (per-device electrical readings, hub IP / SSID / DNS / signal level, ethernet/wifi/gsm channel flags) keeps rendering its last value through the dropout and refreshes in place on the next `STATUS_UPDATE` / `STATUS_BODY` delta. The single deliberate exception is `binary_sensor.<hub>_alimentacion_externa` (mains power) which still flips to `unavailable` so a real hub-power loss during an HTS outage can't be silenced by a cached `on` snapshot. No new functionality, no breaking changes.
+
+### Fixed
+- **HTS-cached sensors stop flapping to `unavailable` on every transient reconnect** (#146, follow-up to #144 in `1.4.0`). `1.4.0` shipped `RestoreSensor` on the four electrical-reading sensors (current, voltage, energy_consumed, power_derived) so they survived HA restarts, but the mid-session disconnect path still wiped the cached state: a 5-minute reconnect cycle blanked the sensors even though the hub remembered the values across our socket outage. `_handle_hts_disconnect` now preserves both `hub_network` and `device_readings`; the next live delta refreshes the cached value in place when HTS comes back. The cached state is also preserved when `_async_update_data` notices a dead HTS task and restarts the stream.
+- **Mains-power binary sensor keeps its alert semantics** (#146). `binary_sensor.<hub>_alimentacion_externa` ANDs its `available` with the new `coordinator.is_hts_alive` property — if the stream is down we refuse to fall back to the cached `externally_powered=True` snapshot, since a real power loss during the dropout would otherwise be silenced. The other hub-network binaries (ethernet / wifi / gsm channel flags) stay in the "preserved last value" bucket because they describe which channel the hub last reported as active, not an operational alert.
+
+### Internal
+- Test suite at **1256** unit tests (was 1248 in `1.4.0`); coverage 85.85% (was 85.76%). New `test_handle_hts_disconnect_preserves_hub_network`, `test_handle_hts_task_done_drops_client_and_broadcasts`, `test_hts_disconnect_preserves_cached_state`, `test_is_hts_alive_reflects_client_presence`, `TestAjaxHubPowerSensor`, `test_diagnostic_sensor_stays_available_when_hts_dead`, and an integration-level `test_sensor_stays_available_across_hts_disconnect` that exercises the real coordinator end-to-end.
+
 ## [1.4.0] - 2026-05-17
 
 Stable release rolling up the `1.4.0-beta.1` … `1.4.0-beta.7` line. Two big themes: **WallSwitch / Socket electrical readings** (`current` A, `voltage` V, `energy_consumed` kWh wired into HA's Energy dashboard, opt-in `power_derived` W) — closes the largest user-visible gap in the integration's device surface — and a new **read-only firmware update entity** for each Ajax hub, bringing the integration to **11 HA platforms**. Also adds an unambiguous deletion path for FCM credentials in the options form. No Ajax wire-protocol changes; everything was already on the wire and the integration was either silent or fragile around it. MINOR bump because new functionality ships; no breaking changes.
