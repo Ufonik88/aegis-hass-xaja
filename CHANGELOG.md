@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0-beta.6] - 2026-05-17
+
+Hotfix for `1.4.0-beta.5`: the new `update.hub_firmware` entity rendered as `unknown` ("Firmware desconocido") on healthy installs instead of "Up-to-date".
+
+### Fixed
+- **`update.hub_firmware` entity now renders as "Up-to-date" when no firmware update is pending.** HA's `UpdateEntity.state` returns `unknown` whenever either `installed_version` or `latest_version` is `None`; the beta.5 entity left both `None` for the no-pending-update case. The entity now reports a constant `installed_version` and mirrors it on `latest_version` when no update is queued (state lands on `STATE_OFF`, rendered as "Up-to-date"); when an update IS queued, `latest_version` reflects the pending version and the state flips to `STATE_ON` ("Update available"). (#143)
+
 ## [1.4.0-beta.5] - 2026-05-17
 
 Adds a read-only firmware update entity for each Ajax hub. One entity per hub, **no install button** — the integration never triggers a firmware update from HA. Bringing the integration to **11 HA platforms**.
