@@ -326,6 +326,7 @@ class TestHelpers:
 from custom_components.aegis_ajax.api.hts.hub_state import (  # noqa: E402
     DEVICE_KEY_CURRENT_MA,
     DEVICE_KEY_POWER_CONSUMED_WH,
+    DEVICE_KEY_VOLTAGE_V,
     ELECTRICAL_DEVICE_TYPES,
     DeviceReadings,
     _int_be_val,
@@ -377,9 +378,28 @@ class TestParseDeviceReadings:
             {
                 DEVICE_KEY_CURRENT_MA: b"\x00\x00\x00\x28",  # 40 mA
                 DEVICE_KEY_POWER_CONSUMED_WH: b"\x00\x00\x09\x69",  # 2409 Wh
+                DEVICE_KEY_VOLTAGE_V: b"\x00\xe6",  # 230 V
             },
         )
-        assert r == DeviceReadings(current_ma=40, power_consumed_wh=2409)
+        assert r == DeviceReadings(current_ma=40, power_consumed_wh=2409, voltage_v=230)
+
+    def test_voltage_parsed_when_other_keys_absent(self) -> None:
+        # Voltage updates can land on their own — current and energy
+        # must stay absent rather than zeroed.
+        r = parse_device_readings(
+            "wall_switch",
+            {DEVICE_KEY_VOLTAGE_V: b"\x00\xe7"},  # 231 V
+        )
+        assert r == DeviceReadings(current_ma=None, power_consumed_wh=None, voltage_v=231)
+
+    def test_partial_update_with_only_voltage_keeps_current_and_energy(self) -> None:
+        prior = DeviceReadings(current_ma=40, power_consumed_wh=2409, voltage_v=228)
+        r = parse_device_readings(
+            "wall_switch",
+            {DEVICE_KEY_VOLTAGE_V: b"\x00\xe7"},  # 231 V
+            existing=prior,
+        )
+        assert r == DeviceReadings(current_ma=40, power_consumed_wh=2409, voltage_v=231)
 
     def test_socket_partial_only_current(self) -> None:
         # Power-consumed sub-key may be absent on a freshly-installed device.
@@ -394,6 +414,41 @@ class TestParseDeviceReadings:
         # returns a DeviceReadings with both fields None, not None.
         r = parse_device_readings("relay_fibra_base", {})
         assert r == DeviceReadings(current_ma=None, power_consumed_wh=None)
+
+    def test_partial_update_without_keys_preserves_existing(self) -> None:
+        """STATUS_UPDATE deltas often omit 0x42/0x43; cached readings must survive (#123)."""
+        prior = DeviceReadings(current_ma=40, power_consumed_wh=2409)
+        # kv carries an unrelated sub-key (the relay state byte) — neither
+        # electrical sub-key is present.
+        r = parse_device_readings("wall_switch", {0x05: b"\x01"}, existing=prior)
+        assert r == prior
+
+    def test_partial_update_with_only_current_keeps_energy(self) -> None:
+        prior = DeviceReadings(current_ma=10, power_consumed_wh=2409)
+        r = parse_device_readings(
+            "wall_switch",
+            {DEVICE_KEY_CURRENT_MA: b"\x00\x00\x00\x28"},
+            existing=prior,
+        )
+        assert r == DeviceReadings(current_ma=40, power_consumed_wh=2409)
+
+    def test_partial_update_with_only_energy_keeps_current(self) -> None:
+        prior = DeviceReadings(current_ma=40, power_consumed_wh=1000)
+        r = parse_device_readings(
+            "socket",
+            {DEVICE_KEY_POWER_CONSUMED_WH: b"\x00\x00\x09\x69"},
+            existing=prior,
+        )
+        assert r == DeviceReadings(current_ma=40, power_consumed_wh=2409)
+
+    def test_no_existing_passed_falls_back_to_overwrite(self) -> None:
+        # Boot-time snapshot path: no prior cache, fresh DeviceReadings built
+        # straight from the kv block.
+        r = parse_device_readings(
+            "wall_switch",
+            {DEVICE_KEY_CURRENT_MA: b"\x28"},
+        )
+        assert r == DeviceReadings(current_ma=40, power_consumed_wh=None)
 
     def test_known_electrical_types(self) -> None:
         # Sanity-check: every type the switch platform treats as a

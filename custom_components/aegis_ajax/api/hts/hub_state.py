@@ -155,6 +155,7 @@ def _int_be_val(val: bytes | None) -> int | None:
 # container (`poz0` in Ajax PRO 2.47 smali) — see #123 for the audit
 # trail.
 
+DEVICE_KEY_VOLTAGE_V = 0x35
 DEVICE_KEY_CURRENT_MA = 0x42
 DEVICE_KEY_POWER_CONSUMED_WH = 0x43
 
@@ -183,35 +184,63 @@ ELECTRICAL_DEVICE_TYPES: frozenset[str] = frozenset(
 class DeviceReadings:
     """Immutable snapshot of a single device's electrical readings.
 
-    `current_ma` and `power_consumed_wh` are `None` when the device does
-    not emit them, when the body simply hadn't been refreshed yet, or
-    when the sub-key was missing on a body that did include the device.
-    Consumers should treat any `None` as "no measurement available" and
-    render the entity as `unknown` rather than zero.
+    All three fields are `None` when the device does not emit them,
+    when the body simply hadn't been refreshed yet, or when the
+    sub-key was missing on a body that did include the device.
+    Consumers should treat any `None` as "no measurement available"
+    and render the entity as `unknown` rather than zero.
+
+    `voltage_v` is a signed short straight from the wire (sub-key
+    0x35, named `voltage` in Ajax PRO 2.47's `poz0` TLV container);
+    units are volts as the device reports them, no scaling. Older
+    WallSwitch firmwares omit the sub-key entirely — power-derived
+    callers must fall back to a nominal voltage in that case.
     """
 
     current_ma: int | None = None
     power_consumed_wh: int | None = None
+    voltage_v: int | None = None
 
 
 def parse_device_readings(
     device_type: str,
     kv: dict[int, bytes],
+    existing: DeviceReadings | None = None,
 ) -> DeviceReadings | None:
     """Map a per-device TLV kv block to `DeviceReadings`.
 
     Returns `None` when the device type does not emit electrical
     readings (so callers can early-out and avoid creating empty
     snapshots). For an electrical-capable device the return is always
-    a `DeviceReadings` instance, even if both sub-keys are absent from
-    the kv block — the empty case is still useful for callers to know
-    the device was *present* in the body.
+    a `DeviceReadings` instance.
+
+    If *existing* is provided only fields whose sub-keys are present in
+    *kv* are updated; all other fields retain their values from
+    *existing*. This is the same merge semantics `parse_hub_params`
+    uses, and matters because the hub pushes per-device deltas
+    (`STATUS_UPDATE`) that frequently carry just one of the two
+    electrical sub-keys — or neither — alongside e.g. the relay
+    state byte. Without the merge, every relay toggle would null out
+    the cached current / energy readings and the sensor would render
+    `unknown` until the next full snapshot (#123 regression).
     """
     if device_type not in ELECTRICAL_DEVICE_TYPES:
         return None
+    base = existing if existing is not None else DeviceReadings()
     return DeviceReadings(
-        current_ma=_int_be_val(kv.get(DEVICE_KEY_CURRENT_MA)),
-        power_consumed_wh=_int_be_val(kv.get(DEVICE_KEY_POWER_CONSUMED_WH)),
+        current_ma=(
+            _int_be_val(kv[DEVICE_KEY_CURRENT_MA])
+            if DEVICE_KEY_CURRENT_MA in kv
+            else base.current_ma
+        ),
+        power_consumed_wh=(
+            _int_be_val(kv[DEVICE_KEY_POWER_CONSUMED_WH])
+            if DEVICE_KEY_POWER_CONSUMED_WH in kv
+            else base.power_consumed_wh
+        ),
+        voltage_v=(
+            _int_be_val(kv[DEVICE_KEY_VOLTAGE_V]) if DEVICE_KEY_VOLTAGE_V in kv else base.voltage_v
+        ),
     )
 
 
