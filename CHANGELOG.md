@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.3] - 2026-05-18
+
+Patch release. Saving FCM credentials through the integration's Configure menu now reliably restarts the push client end-to-end — no manual reload required. Reported by @ArshSoni in #148 on a fresh `1.4.0` install: the "Push notifications" repair card cleared on save, but real-time pushes (arm/disarm, doorbell, alarm) never reached HA until the integration was reloaded by hand. SemVer PATCH; no schema, behaviour, or migration impact for installs where FCM was already working.
+
+### Fixed
+- **Options flow now awaits `async_reload` explicitly when `entry.data` changes** (#148, reported by @ArshSoni). The flow used to rely on `_async_options_update_listener` to fire after the framework writes `options`, but when only FCM creds change (FCM keys live in `data`, not `options`) and the user didn't touch any other option, the framework's second `async_update_entry(options=...)` short-circuits without firing a listener — leaving the FCM client running with the old credentials until a manual reload. Mirrors the pattern already used by `FcmCredentialsRepairFlow`: write the new data, then `await async_reload`. Serialised on `entry.setup_lock`, so racing with any listener-triggered reload is safe.
+
+### Internal
+- Test suite at **1258** unit tests (was 1256 in `1.4.2`); coverage 85.86% (was 85.85%). New `test_options_flow_reloads_when_data_changes` (asserts the reload fires) and `test_options_flow_no_reload_when_data_unchanged` (guards against over-reloading on poll-interval-only tweaks).
+
 ## [1.4.2] - 2026-05-18
 
 Cosmetic i18n patch. The WallSwitch power sensor's display name in the device card drops the parenthetical "(derived)" / "(derivada)" / equivalent across all 14 locales, falling in line with the HA convention that every `device_class=power` sensor labels simply "Power". The value is still computed as `current × voltage` (with a 230V nominal fallback when firmware doesn't emit voltage); the "(derived)" suffix added visual noise without giving the average user anything actionable. No code, schema, or `entity_id` changes — `translation_key`, `unique_id`, class name and computation logic stay untouched, so zero migration impact for existing installs.
