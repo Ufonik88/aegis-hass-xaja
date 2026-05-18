@@ -339,7 +339,7 @@
                 "name": "Verbrauchte elektrische Energie"
             },
             "power_derived": {
-                "name": "Leistung (berechnet)"
+                "name": "Leistung"
             }
         },
         "switch": {

@@ -325,7 +325,7 @@
                 "name": "Electric energy consumed"
             },
             "power_derived": {
-                "name": "Power (derived)"
+                "name": "Power"
             }
         },
         "switch": {

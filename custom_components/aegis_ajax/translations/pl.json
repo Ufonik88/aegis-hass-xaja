@@ -339,7 +339,7 @@
                 "name": "Zużyta energia elektryczna"
             },
             "power_derived": {
-                "name": "Moc (obliczona)"
+                "name": "Moc"
             }
         },
         "switch": {

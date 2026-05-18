@@ -339,7 +339,7 @@
                 "name": "Energia elétrica consumida"
             },
             "power_derived": {
-                "name": "Potência (derivada)"
+                "name": "Potência"
             }
         },
         "switch": {

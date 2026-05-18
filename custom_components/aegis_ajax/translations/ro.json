@@ -339,7 +339,7 @@
                 "name": "Energie electrică consumată"
             },
             "power_derived": {
-                "name": "Putere (derivată)"
+                "name": "Putere"
             }
         },
         "switch": {

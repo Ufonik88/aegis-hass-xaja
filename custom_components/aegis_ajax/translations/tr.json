@@ -339,7 +339,7 @@
                 "name": "Tüketilen elektrik enerjisi"
             },
             "power_derived": {
-                "name": "Güç (türetilmiş)"
+                "name": "Güç"
             }
         },
         "switch": {
