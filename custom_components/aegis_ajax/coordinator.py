@@ -679,6 +679,36 @@ class AjaxCobrandedCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.spaces[space_id] = dc_replace(space, security_state=new_state)
         self.async_set_updated_data({"spaces": self.spaces, "devices": self.devices})
 
+    def apply_push_group_security_state(
+        self,
+        space_id: str,
+        group_id: str,
+        new_state: Any,  # noqa: ANN401
+    ) -> None:
+        """Apply a per-group security_state derived from an FCM push event (#148).
+
+        Mirrors `apply_push_security_state` for the per-group
+        `AjaxGroupAlarmControlPanel` entities: updates the matching `Group`
+        within `space.groups` and notifies listeners. No-ops when the space
+        or group is unknown, or the new state matches the existing one. The
+        space-level state is deliberately not changed here — arming a single
+        group doesn't imply the whole space is armed; that resolves on the
+        next poll.
+        """
+        from dataclasses import replace as dc_replace  # noqa: PLC0415
+
+        space = self.spaces.get(space_id)
+        if space is None or not space.groups:
+            return
+        target = next((g for g in space.groups if g.id == group_id), None)
+        if target is None or target.security_state == new_state:
+            return
+        new_groups = tuple(
+            dc_replace(g, security_state=new_state) if g.id == group_id else g for g in space.groups
+        )
+        self.spaces[space_id] = dc_replace(space, groups=new_groups)
+        self.async_set_updated_data({"spaces": self.spaces, "devices": self.devices})
+
     def _handle_devices_snapshot(self, devices: list[Device]) -> None:
         """Handle initial snapshot or full device snapshot update from stream."""
         for device in devices:

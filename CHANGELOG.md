@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0-beta.3] - 2026-05-19
+
+Beta bump fixing the long-standing delay on per-group alarm panels in spaces configured with Ajax groups (zones). Arming or disarming a single group from the Ajax mobile app now updates the matching `alarm_control_panel.<group>` instantly via the FCM push channel; previously the per-group state only refreshed on the next hourly poll (or on a manual reload), so users with groups would see HA out of sync with the app for up to an hour. Space-wide events are unchanged.
+
+### Added
+- **Per-group `alarm_control_panel` entities now react to FCM arm/disarm pushes** (#148, reported by @ArshSoni). The seven `space_group_*` variants of `SpaceEventTag` (`space_group_armed`, `space_group_armed_with_malfunctions`, `space_group_auto_armed`, `space_group_auto_armed_with_malfunctions`, `space_group_disarmed`, `space_group_auto_disarmed`, `space_group_duress_disarmed`) are now mapped to `RAW_TAG_TO_GROUP_SECURITY_STATE` in `const.py` and dispatched through a new `AjaxCobrandedCoordinator.apply_push_group_security_state(space_id, group_id, new_state)` helper. The group_id is resolved from the FCM payload's `SpaceNotificationSource` (a new `_extract_space_source_info` scan in `notification.py` looks for `type == GROUP (3)` and reads `id` + `name`). The space-level `security_state` is intentionally left alone on group events — arming one group doesn't imply the whole space is armed, so the hub-level alarm panel still relies on the next poll to resolve that. Group-level pushes also fire an `aegis_ajax_event` with `event_type: arm` (or `disarm`) and `raw_tag: space_group_*` so existing automations keep working unchanged; the `raw_tag` and `group_id`/`group_name` fields on the event let new automations target a specific group.
+
+### Internal
+- Test suite at **1289** unit tests (was 1282 in `1.5.0-beta.2`); coverage unchanged. Seven new tests: two in `test_coordinator.py::TestApplyPushGroupSecurityState` exercise the matching/non-matching/unknown-space paths, three in `test_notification.py::TestApplySecurityStateFromEvent` cover the dispatch routing (group_id present → group, missing → no-op, plus disarm variant), three in `test_notification.py::TestNotificationListener` cover `_extract_space_source_info` against real `SpaceNotificationSource` protos (GROUP source, SPACE source skipped, garbage handled).
+
 ## [1.5.0-beta.2] - 2026-05-19
 
 Beta bump adding the SmartLock leg of the "doorbell ring" event surface. Closes the last of the three doorbell SKUs in the Ajax catalog: Wireless DoorBell (hub-level) and MotionCam Video Doorbell already routed in `1.4.5` stable; this beta adds the SmartLock / LockBridge (Yale) variant. Routed through a new `SmartLockEventQualifier` parser pass that mirrors the existing video qualifier walker, so the user-facing surface (an `event` entity firing with `event_type: doorbell_pressed` and `raw_tag: doorbell_pressed`) is identical across all three SKUs and the same automation works regardless of which hardware the user owns.

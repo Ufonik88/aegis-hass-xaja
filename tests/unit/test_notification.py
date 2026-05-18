@@ -202,6 +202,52 @@ class TestNotificationListener:
         result = AjaxNotificationListener._extract_source_info(raw)
         assert result == {}
 
+    def test_extract_space_source_info_returns_group_id_for_group_source(self) -> None:
+        # `space_group_*` events come wrapped in a SpaceNotificationContent
+        # whose `space_source` carries `type=GROUP (3)` plus the group's id
+        # and name. The parser scans for this and returns
+        # `{"group_id": ..., "group_name": ...}` so the per-group alarm panel
+        # can refresh from the push (#148).
+        from systems.ajax.api.ecosystem.v2.communicationsvc.mobile.commonmodels.notification.space import (  # noqa: E501
+            source_pb2,
+            source_type_pb2,
+        )
+
+        source = source_pb2.SpaceNotificationSource(
+            type=source_type_pb2.SpaceNotificationSourceType.GROUP,
+            id="group-abc-123",
+            name="Downstairs",
+        )
+        # The push payload wraps the source as a length-delimited field; the
+        # parser is robust against the outer wrapper, so emitting the raw
+        # source bytes is enough to exercise the scan.
+        raw = source.SerializeToString()
+
+        result = AjaxNotificationListener._extract_space_source_info(raw)
+        assert result == {"group_id": "group-abc-123", "group_name": "Downstairs"}
+
+    def test_extract_space_source_info_skips_non_group_source(self) -> None:
+        # A SPACE-level source (whole-space arm/disarm) must not be reported
+        # as a group, so the per-group routing path stays inert.
+        from systems.ajax.api.ecosystem.v2.communicationsvc.mobile.commonmodels.notification.space import (  # noqa: E501
+            source_pb2,
+            source_type_pb2,
+        )
+
+        source = source_pb2.SpaceNotificationSource(
+            type=source_type_pb2.SpaceNotificationSourceType.SPACE,
+            id="space-xyz",
+            name="Home",
+        )
+        raw = source.SerializeToString()
+
+        result = AjaxNotificationListener._extract_space_source_info(raw)
+        assert result == {}
+
+    def test_extract_space_source_info_returns_empty_for_garbage(self) -> None:
+        result = AjaxNotificationListener._extract_space_source_info(b"\x00\x01\x02\x03")
+        assert result == {}
+
     @pytest.mark.asyncio
     async def test_on_notification_extracts_notification_id(self) -> None:
         """ENCODED_DATA with a notification_id resolves pending notification_id futures."""
@@ -485,13 +531,48 @@ class TestApplySecurityStateFromEvent:
             coordinator.apply_push_security_state, "space-1", SecurityState.NIGHT_MODE
         )
 
-    def test_space_group_armed_does_not_dispatch(self) -> None:
-        # Group-level transitions don't determine the space-level state alone.
+    def test_space_group_armed_without_group_id_does_not_dispatch(self) -> None:
+        # Group-level transitions only refresh the matching per-group panel.
+        # Without a group_id (parser couldn't extract a SpaceNotificationSource
+        # of type GROUP) we have nothing to route, so we no-op rather than
+        # falling back to the space-level dispatch (#148).
         listener, hass, _ = self._make_listener()
 
         listener._apply_security_state_from_event("space-1", {"raw_tag": "space_group_armed"})
 
         hass.loop.call_soon_threadsafe.assert_not_called()
+
+    def test_space_group_armed_with_group_id_dispatches_group_state(self) -> None:
+        from custom_components.aegis_ajax.const import SecurityState
+
+        listener, hass, coordinator = self._make_listener()
+
+        listener._apply_security_state_from_event(
+            "space-1", {"raw_tag": "space_group_armed", "group_id": "group-7"}
+        )
+
+        hass.loop.call_soon_threadsafe.assert_called_once_with(
+            coordinator.apply_push_group_security_state,
+            "space-1",
+            "group-7",
+            SecurityState.ARMED,
+        )
+
+    def test_space_group_disarmed_with_group_id_dispatches_disarmed(self) -> None:
+        from custom_components.aegis_ajax.const import SecurityState
+
+        listener, hass, coordinator = self._make_listener()
+
+        listener._apply_security_state_from_event(
+            "space-1", {"raw_tag": "space_group_disarmed", "group_id": "group-7"}
+        )
+
+        hass.loop.call_soon_threadsafe.assert_called_once_with(
+            coordinator.apply_push_group_security_state,
+            "space-1",
+            "group-7",
+            SecurityState.DISARMED,
+        )
 
 
 class TestExtractEventCompiledProtos:

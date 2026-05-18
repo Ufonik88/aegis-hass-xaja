@@ -176,9 +176,11 @@ EVENT_DOMAIN = f"{DOMAIN}_event"
 # Map HubEventTag oneof field names to the resulting space `security_state`
 # when the corresponding push event arrives. Used to refresh the alarm panel
 # instantly from the FCM payload instead of waiting for the next poll.
-# `group_*` tags are intentionally omitted — they only affect a subgroup, so
-# the resulting space-level state (PARTIALLY_ARMED, ARMED, …) depends on the
-# other groups; let the next poll resolve it.
+# `space_group_*` tags are intentionally omitted from this map — they only
+# affect a single subgroup, so the resulting *space-level* state (PARTIALLY_
+# ARMED, ARMED, …) depends on the other groups; let the next poll resolve
+# space-level. The same tags are mapped per-group in
+# `RAW_TAG_TO_GROUP_SECURITY_STATE` below for the group-level panels (#148).
 RAW_TAG_TO_SECURITY_STATE: dict[str, SecurityState] = {
     # HubEventTag tags (sub-incidents that imply a space-level transition)
     "arm": SecurityState.ARMED,
@@ -203,6 +205,25 @@ RAW_TAG_TO_SECURITY_STATE: dict[str, SecurityState] = {
     "space_night_mode_on_with_malfunctions": SecurityState.NIGHT_MODE,
     "space_night_mode_off": SecurityState.DISARMED,
     "space_duress_night_mode_off": SecurityState.DISARMED,
+}
+
+
+# Map `space_group_*` SpaceEventTag oneof field names to the resulting
+# *group-level* `security_state`. Used to refresh the per-group alarm panel
+# (`AjaxGroupAlarmControlPanel`) instantly from the FCM payload instead of
+# waiting for the next poll (#148). The group_id comes from the
+# `SpaceNotificationSource` wrapping the qualifier — see
+# `notification.py::_extract_space_source_info`. Night-mode tags are absent
+# because per-group panels intentionally don't expose night mode (the
+# underlying flag is space-wide on Ajax).
+RAW_TAG_TO_GROUP_SECURITY_STATE: dict[str, SecurityState] = {
+    "space_group_armed": SecurityState.ARMED,
+    "space_group_armed_with_malfunctions": SecurityState.ARMED,
+    "space_group_auto_armed": SecurityState.ARMED,
+    "space_group_auto_armed_with_malfunctions": SecurityState.ARMED,
+    "space_group_disarmed": SecurityState.DISARMED,
+    "space_group_auto_disarmed": SecurityState.DISARMED,
+    "space_group_duress_disarmed": SecurityState.DISARMED,
 }
 
 
@@ -262,9 +283,11 @@ HUB_EVENT_TAG_MAP: dict[str, str] = {
 # parallel to HUB_EVENT_TAG_MAP because arm/disarm pushes carry a
 # SpaceEventQualifier (in SpaceNotificationContent.qualifier), not a
 # HubEventQualifier — the former is what we need for #68 to fire.
-# `space_group_*` tags are intentionally omitted: they describe a single
-# group's transition and the resulting space-level state can only be resolved
-# from the next poll.
+# Group-level events (`space_group_*`) also map to `arm` / `disarm` so the
+# logbook / event entity render the same wording as space-wide events; the
+# `raw_tag` field on the event payload still distinguishes them, and the
+# per-group alarm panel is updated from `RAW_TAG_TO_GROUP_SECURITY_STATE`
+# (#148).
 SPACE_EVENT_TAG_MAP: dict[str, str] = {
     "space_armed": "arm",
     "space_armed_with_malfunctions": "arm",
@@ -278,6 +301,15 @@ SPACE_EVENT_TAG_MAP: dict[str, str] = {
     "space_night_mode_off": "disarm_night",
     "space_duress_night_mode_off": "disarm_night",
     "space_panic_button_pressed": "panic",
+    # Group-level arm/disarm (#148). Same downstream event_type as space-wide
+    # so existing automations keep working; `raw_tag` differentiates.
+    "space_group_armed": "arm",
+    "space_group_armed_with_malfunctions": "arm",
+    "space_group_auto_armed": "arm",
+    "space_group_auto_armed_with_malfunctions": "arm",
+    "space_group_disarmed": "disarm",
+    "space_group_auto_disarmed": "disarm",
+    "space_group_duress_disarmed": "disarm",
 }
 
 # Map VideoEventTag oneof field names to simplified HA event types. The

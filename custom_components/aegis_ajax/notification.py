@@ -15,6 +15,7 @@ from homeassistant.helpers.storage import Store
 from custom_components.aegis_ajax.const import (
     DOMAIN,
     HUB_EVENT_TAG_MAP,
+    RAW_TAG_TO_GROUP_SECURITY_STATE,
     RAW_TAG_TO_SECURITY_STATE,
     SMARTLOCK_EVENT_TAG_MAP,
     SPACE_EVENT_TAG_MAP,
@@ -437,10 +438,17 @@ class AjaxNotificationListener:
             event_info = self._extract_event_from_proto(raw)
             if event_info:
                 event_type, event_data = event_info
-                # Enrich with source device info (name, room, type)
+                # Enrich with source device info (name, room, type). For
+                # group-level events the source is a SpaceNotificationSource
+                # carrying the group_id; extract that too so the per-group
+                # alarm panel can be updated (#148).
                 source_info = self._extract_source_info(raw)
                 if source_info:
                     event_data.update(source_info)
+                if event_data.get("raw_tag") in RAW_TAG_TO_GROUP_SECURITY_STATE:
+                    group_info = self._extract_space_source_info(raw)
+                    if group_info:
+                        event_data.update(group_info)
                 # Try to route to the correct space by matching hub_id from raw bytes
                 target_space = self._find_space_for_event(raw)
                 if target_space:
@@ -455,7 +463,11 @@ class AjaxNotificationListener:
             _LOGGER.debug("Failed to parse event from push notification", exc_info=True)
 
     def _apply_security_state_from_event(self, space_id: str, event_data: dict[str, Any]) -> None:
-        """If the push event implies a new space security_state, push it now (#68).
+        """If the push event implies a new security_state, push it now (#68 / #148).
+
+        Routes space-wide tags to the space-level `apply_push_security_state`
+        and `space_group_*` tags (when accompanied by a `group_id` extracted
+        from the SpaceNotificationSource) to the per-group equivalent.
 
         The FCM callback runs on the firebase_messaging worker thread, so we
         dispatch the update to the HA event loop via call_soon_threadsafe.
@@ -463,15 +475,26 @@ class AjaxNotificationListener:
         raw_tag = event_data.get("raw_tag")
         if not isinstance(raw_tag, str):
             return
+        if not (self._hass.loop and self._hass.loop.is_running()):
+            return
+        group_state = RAW_TAG_TO_GROUP_SECURITY_STATE.get(raw_tag)
+        group_id = event_data.get("group_id")
+        if group_state is not None and isinstance(group_id, str) and group_id:
+            self._hass.loop.call_soon_threadsafe(
+                self._coordinator.apply_push_group_security_state,
+                space_id,
+                group_id,
+                group_state,
+            )
+            return
         new_state = RAW_TAG_TO_SECURITY_STATE.get(raw_tag)
         if new_state is None:
             return
-        if self._hass.loop and self._hass.loop.is_running():
-            self._hass.loop.call_soon_threadsafe(
-                self._coordinator.apply_push_security_state,
-                space_id,
-                new_state,
-            )
+        self._hass.loop.call_soon_threadsafe(
+            self._coordinator.apply_push_security_state,
+            space_id,
+            new_state,
+        )
 
     def _find_space_for_event(self, raw: bytes) -> str | None:
         """Try to match the event to a space by finding a known hub_id in raw bytes."""
@@ -679,6 +702,50 @@ class AjaxNotificationListener:
                         return result
                 except Exception:
                     continue
+        return {}
+
+    @staticmethod
+    def _extract_space_source_info(raw: bytes) -> dict[str, Any]:
+        """Extract group identifier from a SpaceNotificationSource (#148).
+
+        `space_group_*` SpaceEventTag events are wrapped in a
+        SpaceNotificationContent whose `space_source` is a
+        SpaceNotificationSource with `type == GROUP (3)`, `id == <group_id>`
+        and `name == <group_name>`. The parser scans for that shape and
+        returns `{"group_id": ..., "group_name": ...}` when found, so the
+        per-group alarm panel can be refreshed instantly from FCM. Returns
+        `{}` when the payload doesn't carry a group source (typical for
+        whole-space arm/disarm).
+        """
+        try:
+            from systems.ajax.api.ecosystem.v2.communicationsvc.mobile.commonmodels.notification.space import (  # noqa: PLC0415, E501
+                source_pb2,
+                source_type_pb2,
+            )
+        except ImportError:
+            _LOGGER.debug("SpaceNotificationSource proto not available")
+            return {}
+
+        group_type_value = source_type_pb2.SpaceNotificationSourceType.GROUP
+        # Same scan strategy as `_extract_source_info`: look for field 1
+        # varint (0x08 XX) and try parsing increasingly long slices as
+        # SpaceNotificationSource. Require id + name to be populated to
+        # avoid latching onto a short prefix that parses cleanly but is
+        # missing the trailing fields.
+        for i in range(len(raw) - 5):
+            if raw[i] != 0x08:
+                continue
+            for end in range(i + 6, min(i + 80, len(raw) + 1)):
+                try:
+                    source = source_pb2.SpaceNotificationSource()
+                    source.ParseFromString(raw[i:end])
+                except Exception:
+                    continue
+                if source.type != group_type_value:
+                    continue
+                if not source.id or not source.name:
+                    continue
+                return {"group_id": source.id, "group_name": source.name}
         return {}
 
     @staticmethod

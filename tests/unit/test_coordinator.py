@@ -1204,6 +1204,92 @@ class TestApplyPushSecurityState:
         coordinator.async_set_updated_data.assert_called_once()
 
 
+class TestApplyPushGroupSecurityState:
+    """Per-group arm/disarm push updates (#148): only the matching Group is
+    refreshed instantly, the space-level state stays put until the next poll
+    resolves whether all groups now agree."""
+
+    def _make_coordinator_with_groups(self) -> AjaxCobrandedCoordinator:  # noqa: F821
+        from custom_components.aegis_ajax.api.models import Group
+        from custom_components.aegis_ajax.coordinator import AjaxCobrandedCoordinator
+
+        hass = MagicMock()
+        client = MagicMock()
+        with patch(
+            "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
+            return_value=None,
+        ):
+            coordinator = AjaxCobrandedCoordinator(
+                hass=hass, client=client, space_ids=["s1"], poll_interval=300
+            )
+        coordinator.hass = hass
+        coordinator.async_set_updated_data = MagicMock()
+        coordinator.spaces = {
+            "s1": Space(
+                id="s1",
+                hub_id="hub-1",
+                name="Home",
+                security_state=SecurityState.DISARMED,
+                connection_status=ConnectionStatus.ONLINE,
+                malfunctions_count=0,
+                group_mode_enabled=True,
+                groups=(
+                    Group(
+                        id="g1",
+                        space_id="s1",
+                        name="Downstairs",
+                        security_state=SecurityState.DISARMED,
+                        sorting_key="01",
+                    ),
+                    Group(
+                        id="g2",
+                        space_id="s1",
+                        name="Upstairs",
+                        security_state=SecurityState.DISARMED,
+                        sorting_key="02",
+                    ),
+                ),
+            )
+        }
+        return coordinator
+
+    def test_arm_one_group_only_updates_that_group(self) -> None:
+        coordinator = self._make_coordinator_with_groups()
+
+        coordinator.apply_push_group_security_state("s1", "g1", SecurityState.ARMED)
+
+        groups = {g.id: g for g in coordinator.spaces["s1"].groups}
+        assert groups["g1"].security_state == SecurityState.ARMED
+        assert groups["g2"].security_state == SecurityState.DISARMED
+        # Space-level state intentionally not touched — only the next poll
+        # decides whether the whole space is armed.
+        assert coordinator.spaces["s1"].security_state == SecurityState.DISARMED
+        coordinator.async_set_updated_data.assert_called_once()
+
+    def test_no_change_skips_update(self) -> None:
+        coordinator = self._make_coordinator_with_groups()
+
+        coordinator.apply_push_group_security_state("s1", "g1", SecurityState.DISARMED)
+
+        coordinator.async_set_updated_data.assert_not_called()
+
+    def test_unknown_group_no_op(self) -> None:
+        coordinator = self._make_coordinator_with_groups()
+
+        coordinator.apply_push_group_security_state("s1", "unknown", SecurityState.ARMED)
+
+        groups = {g.id: g for g in coordinator.spaces["s1"].groups}
+        assert groups["g1"].security_state == SecurityState.DISARMED
+        coordinator.async_set_updated_data.assert_not_called()
+
+    def test_unknown_space_no_op(self) -> None:
+        coordinator = self._make_coordinator_with_groups()
+
+        coordinator.apply_push_group_security_state("missing", "g1", SecurityState.ARMED)
+
+        coordinator.async_set_updated_data.assert_not_called()
+
+
 class TestCachedSnapshotStart:
     """First-refresh path now skips `get_devices_snapshot` when a cache is
     available, returning cached devices immediately so platform setup
