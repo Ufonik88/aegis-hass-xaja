@@ -59,7 +59,13 @@ GRPC_HOST = "mobile-gw.prod.ajax.systems"
 GRPC_PORT = 443
 
 CLIENT_OS = "Android"
-CLIENT_VERSION = "3.46"
+# Pin to "3.30" — the Ajax server gates parts of the snapshot response on
+# `client-version-major`. Reporting a newer version (e.g. "3.46") causes the
+# server to omit `monitoring_companies` from `SpaceService.stream`, leaving
+# the CRA-company diagnostic sensor empty. Pinning to "3.30" restores the
+# legacy response shape. Bump only after verifying the modern endpoint that
+# replaces this data path.
+CLIENT_VERSION = "3.30"
 APPLICATION_LABEL = "Ajax"  # default (main Ajax app labelName)
 KNOWN_APP_LABELS = [
     "Ajax",
@@ -90,7 +96,7 @@ KNOWN_APP_LABELS = [
     "Protecta",
     "ajax_pro",
 ]
-CLIENT_DEVICE_MODEL = "SM-S921B"  # Generic Android model (Samsung Galaxy S24)
+CLIENT_DEVICE_MODEL = "SM-A536B"  # Galaxy A53 — paired with CLIENT_VERSION="3.30"
 CLIENT_DEVICE_TYPE = "MOBILE"
 CLIENT_APP_TYPE = "USER"
 

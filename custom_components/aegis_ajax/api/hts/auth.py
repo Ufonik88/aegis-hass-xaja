@@ -62,9 +62,9 @@ def build_connect_request(
     device_id: str,
     app_label: str,
     client_os: str = "Android",
-    client_version: str = "3.46",
+    client_version: str = "3.30",
     connection_type: int = 5,
-    device_model: str = "SM-S921B",
+    device_model: str = "SM-A536B",
 ) -> bytes:
     """Build the TLV payload for a CONNECT_CLIENT_NEW message (msgType=0x11).
 
@@ -81,9 +81,9 @@ def build_connect_request(
         device_id:        Device identifier string.
         app_label:        Application label string.
         client_os:        OS name string (default "Android").
-        client_version:   App version string (default "3.46").
+        client_version:   App version string (default "3.30"; see const.CLIENT_VERSION).
         connection_type:  Connection type integer (default 5).
-        device_model:     Device model string (default "SM-S921B").
+        device_model:     Device model string (default "SM-A536B"; see const.CLIENT_DEVICE_MODEL).
 
     Returns:
         TLV-encoded payload bytes.
