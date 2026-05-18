@@ -196,6 +196,9 @@ class TestProtoDescriptorCollisionGuard:
         assert any("backup copy" in r.message for r in caplog.records), (
             "remediation hint should mention the backup-folder scenario"
         )
+        assert any("Ajax-related custom integration" in r.message for r in caplog.records), (
+            "remediation hint should mention the cross-integration scenario"
+        )
         assert any("custom_components" in r.message for r in caplog.records)
 
     def test_no_log_for_unrelated_typeerror(self, caplog: pytest.LogCaptureFixture) -> None:

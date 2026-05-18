@@ -20,7 +20,7 @@ Ajax Systems provides co-branded versions of their mobile app to security compan
 
 ## Features
 
-- **Alarm Control Panel**: Arm away, disarm, night mode, group arming with PIN code support
+- **Alarm Control Panel**: Arm away, disarm, night mode, group arming with PIN code support. When the space is in group / zone mode, per-group panels are created and react to FCM push events instantly — arming or disarming a single group from the Ajax mobile app reflects in HA within seconds (whole-space transitions already worked this way; group-level transitions joined in `1.5.0`)
 - **Force Arm Services**: `aegis_ajax.force_arm` and `aegis_ajax.force_arm_night` to arm ignoring open sensors
 - **Binary Sensors**: Door open/close, motion detection, smoke, steam (FireProtect 2 chamber discriminator), leak, tamper, CO, heat, glass break, vibration, tilt (DoorProtect Plus accelerometer), CRA monitoring status, cellular connection, lid tamper, external contact alert (wired reed switches on DoorProtect/Hub Hybrid inputs), external contact fault, MultiTransmitter wired-input alert with alarm category, anti-masking, interference detection, ethernet link, Wi-Fi link, mains power
 - **Hub Network**: Real-time hub network data — ethernet/wifi/gsm connection status, Wi-Fi SSID and signal strength, IP addressing, cellular signal strength and network type, power supply status

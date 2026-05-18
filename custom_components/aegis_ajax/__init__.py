@@ -17,23 +17,41 @@ def _log_proto_descriptor_collision(exc: TypeError) -> None:
     `_descriptor_pool.AddSerializedFile` raises
     `TypeError("Couldn't build proto file into descriptor pool: duplicate
     file name ...")` when two `_pb2.py` modules try to register the same
-    proto path in protobuf's global default pool — almost always a stale
-    copy of this integration in `custom_components/` (backup folder,
-    partial HACS update). HA's UI surfaces the bare TypeError as the
-    cryptic "Invalid handler specified", so we log the fix path before
+    proto path in protobuf's global default pool. Two scenarios in the
+    wild:
+
+    1. A stale or backup copy of this integration alongside the live one
+       in `custom_components/` (any folder whose name starts with
+       `aegis_ajax` other than the active install). Most common cause.
+    2. Another custom integration in `custom_components/` (typically a
+       different Ajax-related HACS integration) that compiles the same
+       upstream `systems/ajax/...` proto files into its own
+       `_pb2.py` modules. Python protobuf keeps a single global descriptor
+       pool, so both integrations cannot coexist in the same HA process
+       no matter which loads first.
+
+    HA's UI surfaces the bare TypeError as the cryptic "Invalid handler
+    specified", so we log the fix path for both scenarios before
     re-raising. No-op for unrelated TypeErrors.
     """
     if "duplicate file name" not in str(exc):
         return
     _LOGGER.error(
         "Aegis for Ajax failed to load: duplicate protobuf descriptors "
-        "detected (%s). This usually means there's a stale or backup copy "
-        "of the integration alongside the live one in custom_components/ "
-        "(any folder starting with 'aegis_ajax' other than the active "
-        "install will trip this). List custom_components/, move or rename "
-        "the extra folder so it no longer starts with 'aegis_ajax', and "
-        "restart Home Assistant. A clean uninstall + reinstall via HACS "
-        "also clears it.",
+        "detected (%s). Two possible causes:\n"
+        "  (a) A stale or backup copy of this integration alongside the "
+        "live one — any folder under custom_components/ whose name starts "
+        "with 'aegis_ajax' other than the active install will trip this. "
+        "Fix: move or rename the extra folder (a clean HACS uninstall + "
+        "reinstall also clears it) and restart Home Assistant.\n"
+        "  (b) A different Ajax-related custom integration in "
+        "custom_components/ that bundles overlapping 'systems/ajax/...' "
+        "proto definitions. Python protobuf has a single global descriptor "
+        "pool, so two integrations both compiling the upstream Ajax protos "
+        "cannot coexist. Fix: list custom_components/, identify the other "
+        "Ajax-related integration (folders like 'ajax', 'ajaxsystems', "
+        "etc.), and choose one — the integrations are mutually exclusive "
+        "in the same HA instance.",
         exc,
     )
 
