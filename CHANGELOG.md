@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0-beta.7] - 2026-05-21
+
+Setup-flow UX bump driven by #166 (thanks @Sven2410). Adding the integration with an Ajax account that has access to many Spaces — the installer case — used to pre-check every Space and render them as a linear checkbox list, so it was easy to confirm the wrong customer's Space by inertia and slow to scan for the right one.
+
+### Changed
+- **Space selection now starts empty and filters by name.** The selector switched to dropdown mode (`SelectSelectorMode.DROPDOWN`, `sort=True`), so Home Assistant renders the chip input with the built-in name-filter autocomplete instead of a checkbox list. `default=[]` makes the initial state empty — no Space is selected until the installer explicitly adds it. A server-side `vol.Length(min=1)` rejects an empty submission as a belt-and-braces guard (the frontend's `Required` semantics already disable Submit while empty). Single-Space users (the common case) pay one extra click; installers with many customer Spaces get a setup flow that scales. Reconfigure and options flows are unaffected — neither presents the Space picker.
+
+### Internal
+- Test suite at **1304** unit tests (was 1302 in `1.5.0-beta.6`); coverage 86.21%. Two new tests in `tests/unit/test_config_flow.py::TestAsyncStepSelectSpaces` cover the new shape: schema starts empty + selector is dropdown+filterable+sorted; empty selection (both explicit `[]` and default-fill) is rejected by `vol.Length(min=1)`.
+
 ## [1.5.0-beta.6] - 2026-05-21
 
 Observability beta bump — purely additive, no runtime behaviour change. Driven by the `1.5.0-beta.5` data on #148: the parser identifies `space_group_disarmed` / `space_group_auto_disarmed` correctly, but `_extract_space_source_info` returns `group_id=None` on real wire payloads, so per-group alarm panels never refresh from FCM and only catch up on the next poll. We have no captured payload to diff against, so the source scan can't be fixed blind — this bump ships the diagnostic that hands us the bytes.
