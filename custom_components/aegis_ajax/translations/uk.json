@@ -378,6 +378,9 @@
             },
             "power_derived": {
                 "name": "Потужність"
+            },
+            "power": {
+                "name": "Потужність"
             }
         },
         "switch": {

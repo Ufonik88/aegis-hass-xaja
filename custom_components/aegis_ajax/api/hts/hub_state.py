@@ -158,55 +158,88 @@ DEVICE_KEY_VOLTAGE_V = 0x35
 DEVICE_KEY_CURRENT_MA = 0x42
 DEVICE_KEY_POWER_CONSUMED_WH = 0x43
 
-# device_type strings (as produced by `DevicesApi`) that emit the
-# electrical-reading sub-keys. Mirrors SWITCH_DEVICE_TYPES in switch.py
-# minus the light-switch variants whose firmware doesn't measure current
-# (those are dry-contact relays, not load-meters). When a new
-# electrical-reading-capable device family appears, add it here and to
-# SWITCH_DEVICE_TYPES.
-ELECTRICAL_DEVICE_TYPES: frozenset[str] = frozenset(
-    {
-        "wall_switch",
-        "relay",
-        "relay_fibra_base",
-        "socket",
-        "socket_b",
-        "socket_g",
-        "socket_type_g_plus",
-        # `socket_outlet_type_e` and `socket_outlet_type_f` are deliberately
-        # excluded (#179). Their STATUS_BODY uses a different sub-key
-        # layout: `0x35` is a 1-byte field (not the 2-byte signed-short
-        # voltage the WallSwitch family ships), `0x42`/`0x43` are absent,
-        # and the actual readings live in `0x37(4b)`, `0x73(16b)`,
-        # `0x74(16b)` which we haven't load-calibrated yet. Until a
-        # capture under known loads identifies which key carries voltage
-        # / current / power / energy, parsing them off the WallSwitch
-        # constants produces nonsense (0 V + a fake ~55 W from the
-        # `current × nominal-voltage` fallback). Re-add the moment we
-        # have a verified mapping.
-    }
-)
+# Outlet Type E / Type F sub-keys (#179). Calibrated 2026-05-25 from a
+# four-load reboot capture (off / idle / 15 W / ~2 kW). Distinct layout
+# from the WallSwitch family above — same numeric keys carry different
+# meaning on this device family.
+DEVICE_KEY_OUTLET_POWER_W = 0x3F
+DEVICE_KEY_OUTLET_ENERGY_WH = 0x40
+DEVICE_KEY_OUTLET_CURRENT_10MA = 0x41
+DEVICE_KEY_OUTLET_VOLTAGE_V = 0x42
 
 
 @dataclasses.dataclass(frozen=True)
 class DeviceReadings:
     """Immutable snapshot of a single device's electrical readings.
 
-    All three fields are `None` when the device does not emit them,
-    when the body simply hadn't been refreshed yet, or when the
-    sub-key was missing on a body that did include the device.
-    Consumers should treat any `None` as "no measurement available"
-    and render the entity as `unknown` rather than zero.
+    Every field is `None` when the device does not emit it, when the
+    body simply hadn't been refreshed yet, or when the sub-key was
+    missing on a body that did include the device. Consumers should
+    treat any `None` as "no measurement available" and render the
+    entity as `unknown` rather than zero.
 
-    `voltage_v` is the device-reported line voltage as a signed
-    short, in volts (no scaling). Older WallSwitch firmwares omit
-    it entirely — power-derived callers must fall back to a nominal
-    voltage in that case.
+    `voltage_v` is the device-reported line voltage in volts (no
+    scaling). Older WallSwitch firmwares omit it entirely — the
+    derived-power sensor falls back to a nominal voltage in that case.
+
+    `power_w` is the device-reported instantaneous power in watts. Only
+    Outlet Type E / Type F report it directly; the WallSwitch family
+    keeps it `None` and lets the derived-power sensor compute `current
+    × voltage`.
     """
 
     current_ma: int | None = None
     power_consumed_wh: int | None = None
     voltage_v: int | None = None
+    power_w: int | None = None
+
+
+# Per-device-family sub-key map. Same DeviceReadings shape feeds both
+# families; the mapping selects which sub-keys land in which field and
+# at what scale. Scale converts the raw big-endian integer into the
+# field's stored unit (e.g. Outlet current is reported in 10 mA units,
+# so scale=10 yields the same mA contract the WallSwitch path already
+# uses downstream).
+_WALLSWITCH_KEY_MAP: dict[int, tuple[str, int]] = {
+    DEVICE_KEY_VOLTAGE_V: ("voltage_v", 1),
+    DEVICE_KEY_CURRENT_MA: ("current_ma", 1),
+    DEVICE_KEY_POWER_CONSUMED_WH: ("power_consumed_wh", 1),
+}
+_OUTLET_KEY_MAP: dict[int, tuple[str, int]] = {
+    DEVICE_KEY_OUTLET_POWER_W: ("power_w", 1),
+    DEVICE_KEY_OUTLET_ENERGY_WH: ("power_consumed_wh", 1),
+    DEVICE_KEY_OUTLET_CURRENT_10MA: ("current_ma", 10),
+    DEVICE_KEY_OUTLET_VOLTAGE_V: ("voltage_v", 1),
+}
+
+_DEVICE_READINGS_KEY_MAP: dict[str, dict[int, tuple[str, int]]] = {
+    "wall_switch": _WALLSWITCH_KEY_MAP,
+    "relay": _WALLSWITCH_KEY_MAP,
+    "relay_fibra_base": _WALLSWITCH_KEY_MAP,
+    "socket": _WALLSWITCH_KEY_MAP,
+    "socket_b": _WALLSWITCH_KEY_MAP,
+    "socket_g": _WALLSWITCH_KEY_MAP,
+    "socket_type_g_plus": _WALLSWITCH_KEY_MAP,
+    "socket_outlet_type_e": _OUTLET_KEY_MAP,
+    "socket_outlet_type_f": _OUTLET_KEY_MAP,
+}
+
+# device_type strings (as produced by `DevicesApi`) that emit
+# electrical-reading sub-keys. Mirrors SWITCH_DEVICE_TYPES in switch.py
+# minus the light-switch variants whose firmware doesn't measure current
+# (those are dry-contact relays, not load-meters). When a new
+# electrical-reading-capable device family appears, add it here, to
+# `_DEVICE_READINGS_KEY_MAP`, and to SWITCH_DEVICE_TYPES.
+ELECTRICAL_DEVICE_TYPES: frozenset[str] = frozenset(_DEVICE_READINGS_KEY_MAP.keys())
+
+# Device families whose firmware reports instantaneous power directly
+# (DeviceReadings.power_w is populated by the parser). Used by the
+# sensor platform to register a real Power entity for these devices
+# instead of the derived-from-current placeholder the WallSwitch
+# family uses.
+DIRECT_POWER_DEVICE_TYPES: frozenset[str] = frozenset(
+    {"socket_outlet_type_e", "socket_outlet_type_f"}
+)
 
 
 def parse_device_readings(
@@ -225,30 +258,26 @@ def parse_device_readings(
     *kv* are updated; all other fields retain their values from
     *existing*. This is the same merge semantics `parse_hub_params`
     uses, and matters because the hub pushes per-device deltas
-    (`STATUS_UPDATE`) that frequently carry just one of the two
-    electrical sub-keys — or neither — alongside e.g. the relay
-    state byte. Without the merge, every relay toggle would null out
-    the cached current / energy readings and the sensor would render
-    `unknown` until the next full snapshot (#123 regression).
+    (`STATUS_UPDATE`) that frequently carry just one electrical sub-key
+    — or none — alongside e.g. the relay state byte. Without the merge,
+    every relay toggle would null out the cached readings and the
+    sensor would render `unknown` until the next full snapshot
+    (#123 regression).
     """
-    if device_type not in ELECTRICAL_DEVICE_TYPES:
+    key_map = _DEVICE_READINGS_KEY_MAP.get(device_type)
+    if key_map is None:
         return None
     base = existing if existing is not None else DeviceReadings()
-    return DeviceReadings(
-        current_ma=(
-            _int_be_val(kv[DEVICE_KEY_CURRENT_MA])
-            if DEVICE_KEY_CURRENT_MA in kv
-            else base.current_ma
-        ),
-        power_consumed_wh=(
-            _int_be_val(kv[DEVICE_KEY_POWER_CONSUMED_WH])
-            if DEVICE_KEY_POWER_CONSUMED_WH in kv
-            else base.power_consumed_wh
-        ),
-        voltage_v=(
-            _int_be_val(kv[DEVICE_KEY_VOLTAGE_V]) if DEVICE_KEY_VOLTAGE_V in kv else base.voltage_v
-        ),
-    )
+    fields: dict[str, int | None] = dataclasses.asdict(base)
+    for sub_key, (field_name, scale) in key_map.items():
+        raw_bytes = kv.get(sub_key)
+        if raw_bytes is None:
+            continue
+        raw = _int_be_val(raw_bytes)
+        if raw is None:
+            continue
+        fields[field_name] = raw * scale
+    return DeviceReadings(**fields)
 
 
 # ---------------------------------------------------------------------------

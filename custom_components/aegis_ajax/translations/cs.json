@@ -378,6 +378,9 @@
             },
             "power_derived": {
                 "name": "Výkon"
+            },
+            "power": {
+                "name": "Výkon"
             }
         },
         "switch": {

@@ -325,8 +325,13 @@ class TestHelpers:
 
 from custom_components.aegis_ajax.api.hts.hub_state import (  # noqa: E402
     DEVICE_KEY_CURRENT_MA,
+    DEVICE_KEY_OUTLET_CURRENT_10MA,
+    DEVICE_KEY_OUTLET_ENERGY_WH,
+    DEVICE_KEY_OUTLET_POWER_W,
+    DEVICE_KEY_OUTLET_VOLTAGE_V,
     DEVICE_KEY_POWER_CONSUMED_WH,
     DEVICE_KEY_VOLTAGE_V,
+    DIRECT_POWER_DEVICE_TYPES,
     ELECTRICAL_DEVICE_TYPES,
     DeviceReadings,
     _int_be_val,
@@ -452,12 +457,7 @@ class TestParseDeviceReadings:
 
     def test_known_electrical_types(self) -> None:
         # Sanity-check: every type the switch platform treats as a
-        # power-controllable relay that *should* emit readings is in
-        # ELECTRICAL_DEVICE_TYPES.
-        # `socket_outlet_type_e` and `socket_outlet_type_f` are deliberately
-        # absent — their actual electrical sub-key map is unknown (#179) so
-        # the parser must not produce numbers off the WallSwitch mapping.
-        # Re-add once a load-calibrated capture lands.
+        # power-controllable relay is in ELECTRICAL_DEVICE_TYPES.
         for dt in (
             "wall_switch",
             "relay",
@@ -466,24 +466,95 @@ class TestParseDeviceReadings:
             "socket_b",
             "socket_g",
             "socket_type_g_plus",
+            "socket_outlet_type_e",
+            "socket_outlet_type_f",
         ):
             assert dt in ELECTRICAL_DEVICE_TYPES, dt
 
-    def test_socket_outlet_type_e_returns_none_pending_mapping(self) -> None:
-        """Outlet Type E uses a different electrical sub-key layout than the
-        WallSwitch family (#179): `0x35` is 1 byte (not 2-byte voltage),
-        `0x42`/`0x43` are absent, and the real readings live in `0x37(4b)`,
-        `0x73(16b)`, `0x74(16b)` which we haven't load-calibrated yet.
-        Until then `parse_device_readings` returns None so the four
-        electrical sensors render `unknown` instead of garbage values."""
-        kv_outlet_shape = {
-            0x35: b"\x00",  # 1-byte field misread as voltage before #179
-            0x37: b"\x00\x11\x22\x33",
-            0x73: b"\x00" * 16,
-            0x74: b"\x00" * 16,
-        }
-        assert parse_device_readings("socket_outlet_type_e", kv_outlet_shape) is None
+    def test_direct_power_device_types_subset(self) -> None:
+        # Only Outlet Type E / F report instantaneous power directly;
+        # the WallSwitch family derives it from current × voltage.
+        assert frozenset({"socket_outlet_type_e", "socket_outlet_type_f"}) == (
+            DIRECT_POWER_DEVICE_TYPES
+        )
+        assert DIRECT_POWER_DEVICE_TYPES <= ELECTRICAL_DEVICE_TYPES
 
-    def test_socket_outlet_type_f_returns_none_pending_mapping(self) -> None:
-        """Symmetric to type E: same EU-socket family, same unknown layout."""
-        assert parse_device_readings("socket_outlet_type_f", {0x35: b"\x00"}) is None
+    def test_socket_outlet_type_e_full(self) -> None:
+        # Calibrated 2026-05-25 from SaetanSaDiablo's four-load capture
+        # (#179). 2 080 W / 230 V load row: power=0x0820=2080 W,
+        # current=0x037d=893 raw → ×10 mA = 8930 mA, energy=0x18c2e
+        # Wh cumulative, voltage=0xe7=231 V.
+        r = parse_device_readings(
+            "socket_outlet_type_e",
+            {
+                DEVICE_KEY_OUTLET_POWER_W: b"\x08\x20",
+                DEVICE_KEY_OUTLET_ENERGY_WH: b"\x00\x01\x8c\x2e",
+                DEVICE_KEY_OUTLET_CURRENT_10MA: b"\x03\x7d",
+                DEVICE_KEY_OUTLET_VOLTAGE_V: b"\x00\xe7",
+            },
+        )
+        assert r == DeviceReadings(
+            current_ma=8930,
+            power_consumed_wh=101422,
+            voltage_v=231,
+            power_w=2080,
+        )
+
+    def test_socket_outlet_idle_keeps_energy_counter(self) -> None:
+        # Off / idle row: power and current zero, voltage and energy
+        # still reported. Voltage 0xea = 234 V; energy 0x18c0f Wh.
+        r = parse_device_readings(
+            "socket_outlet_type_e",
+            {
+                DEVICE_KEY_OUTLET_POWER_W: b"\x00\x00",
+                DEVICE_KEY_OUTLET_ENERGY_WH: b"\x00\x01\x8c\x0f",
+                DEVICE_KEY_OUTLET_CURRENT_10MA: b"\x00\x00",
+                DEVICE_KEY_OUTLET_VOLTAGE_V: b"\x00\xea",
+            },
+        )
+        assert r == DeviceReadings(
+            current_ma=0,
+            power_consumed_wh=101391,
+            voltage_v=234,
+            power_w=0,
+        )
+
+    def test_socket_outlet_partial_keeps_existing(self) -> None:
+        # STATUS_UPDATE deltas on Outlet only carry the readings that
+        # actually changed. A power-only delta must not blank the
+        # cached energy / voltage / current values.
+        prior = DeviceReadings(
+            current_ma=8930, power_consumed_wh=101422, voltage_v=231, power_w=2080
+        )
+        r = parse_device_readings(
+            "socket_outlet_type_e",
+            {DEVICE_KEY_OUTLET_POWER_W: b"\x00\x0f"},  # 15 W
+            existing=prior,
+        )
+        assert r == DeviceReadings(
+            current_ma=8930, power_consumed_wh=101422, voltage_v=231, power_w=15
+        )
+
+    def test_socket_outlet_current_scaled_by_ten(self) -> None:
+        # 60 mA at 15 W / 230 V: raw 0x06 × 10 mA scale = 60 mA.
+        r = parse_device_readings(
+            "socket_outlet_type_f",
+            {DEVICE_KEY_OUTLET_CURRENT_10MA: b"\x00\x06"},
+        )
+        assert r is not None
+        assert r.current_ma == 60
+
+    def test_wall_switch_does_not_populate_power_w(self) -> None:
+        # WallSwitch family doesn't report instantaneous power — the
+        # derived sensor handles that. `power_w` stays None even when
+        # the body carries every WallSwitch sub-key.
+        r = parse_device_readings(
+            "wall_switch",
+            {
+                DEVICE_KEY_CURRENT_MA: b"\x00\x28",
+                DEVICE_KEY_POWER_CONSUMED_WH: b"\x00\x00\x09\x69",
+                DEVICE_KEY_VOLTAGE_V: b"\x00\xe6",
+            },
+        )
+        assert r is not None
+        assert r.power_w is None

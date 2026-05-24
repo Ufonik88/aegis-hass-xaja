@@ -23,7 +23,10 @@ from homeassistant.const import (
 )
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from custom_components.aegis_ajax.api.hts.hub_state import ELECTRICAL_DEVICE_TYPES
+from custom_components.aegis_ajax.api.hts.hub_state import (
+    DIRECT_POWER_DEVICE_TYPES,
+    ELECTRICAL_DEVICE_TYPES,
+)
 from custom_components.aegis_ajax.api.models import MonitoringCompanyStatus
 from custom_components.aegis_ajax.coordinator import AjaxCobrandedCoordinator
 from custom_components.aegis_ajax.entity import build_device_info
@@ -167,12 +170,16 @@ async def async_setup_entry(
             entities.append(AjaxHubCellularNetworkSensor(coordinator, space.hub_id))
 
     # Per-device electrical sensors for WallSwitch / Socket family (#123)
+    # and Outlet Type E / F (#179, calibrated in 1.5.3-beta.11).
     for device_id, device in coordinator.devices.items():
         if device.device_type in ELECTRICAL_DEVICE_TYPES:
             entities.append(AjaxDeviceCurrentSensor(coordinator, device_id))
             entities.append(AjaxDeviceVoltageSensor(coordinator, device_id))
             entities.append(AjaxDeviceEnergyConsumedSensor(coordinator, device_id))
-            entities.append(AjaxDeviceDerivedPowerSensor(coordinator, device_id))
+            if device.device_type in DIRECT_POWER_DEVICE_TYPES:
+                entities.append(AjaxDevicePowerSensor(coordinator, device_id))
+            else:
+                entities.append(AjaxDeviceDerivedPowerSensor(coordinator, device_id))
 
     async_add_entities(entities)
 
@@ -660,3 +667,30 @@ class AjaxDeviceDerivedPowerSensor(_AjaxDeviceReadingsBase):
             else NOMINAL_GRID_VOLTAGE_V
         )
         return (readings.current_ma / 1000.0) * voltage
+
+
+class AjaxDevicePowerSensor(_AjaxDeviceReadingsBase):
+    """Instantaneous power reported directly by the device (W).
+
+    Used by device families that include a power reading in the
+    `STATUS_BODY` row (Outlet Type E / Type F, #179) — distinct from
+    the WallSwitch derived sensor which multiplies current by voltage.
+    Enabled by default because the reading is real, not estimated.
+    """
+
+    _attr_translation_key = "power"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_suggested_display_precision = 0
+
+    def __init__(self, coordinator: AjaxCobrandedCoordinator, device_id: str) -> None:
+        super().__init__(coordinator, device_id)
+        self._attr_unique_id = f"aegis_ajax_{device_id}_power"
+
+    @property
+    def _live_native_value(self) -> float | None:
+        readings = self.coordinator.device_readings.get(self._device_id)
+        if readings is None or readings.power_w is None:
+            return None
+        return float(readings.power_w)

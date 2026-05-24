@@ -567,6 +567,7 @@ class TestAjaxDeviceElectricalSensors:
         current_ma: int | None = 40,
         power_consumed_wh: int | None = 2409,
         voltage_v: int | None = None,
+        power_w: int | None = None,
     ) -> MagicMock:
         from custom_components.aegis_ajax.api.hts.hub_state import DeviceReadings
         from custom_components.aegis_ajax.api.models import Device
@@ -587,12 +588,13 @@ class TestAjaxDeviceElectricalSensors:
             battery=None,
         )
         coordinator.devices = {"311B058D": device}
-        if current_ma is not None or power_consumed_wh is not None or voltage_v is not None:
+        if any(v is not None for v in (current_ma, power_consumed_wh, voltage_v, power_w)):
             coordinator.device_readings = {
                 "311B058D": DeviceReadings(
                     current_ma=current_ma,
                     power_consumed_wh=power_consumed_wh,
                     voltage_v=voltage_v,
+                    power_w=power_w,
                 )
             }
         else:
@@ -703,6 +705,47 @@ class TestAjaxDeviceElectricalSensors:
         coordinator = self._make_coordinator()
         sensor = AjaxDeviceDerivedPowerSensor(coordinator, "311B058D")
         assert sensor.entity_registry_enabled_default is False
+
+    def test_direct_power_sensor_returns_device_reported_value(self) -> None:
+        # Outlet Type E reports instantaneous power directly (#179).
+        from custom_components.aegis_ajax.sensor import AjaxDevicePowerSensor
+
+        coordinator = self._make_coordinator(device_type="socket_outlet_type_e", power_w=2080)
+        sensor = AjaxDevicePowerSensor(coordinator, "311B058D")
+        assert sensor.native_value == 2080
+
+    def test_direct_power_sensor_none_when_not_reported(self) -> None:
+        from custom_components.aegis_ajax.sensor import AjaxDevicePowerSensor
+
+        coordinator = self._make_coordinator(
+            device_type="socket_outlet_type_e", current_ma=None, power_consumed_wh=None
+        )
+        sensor = AjaxDevicePowerSensor(coordinator, "311B058D")
+        assert sensor.native_value is None
+
+    def test_direct_power_sensor_enabled_by_default(self) -> None:
+        # Direct readings are real (not derived) — surface them by default.
+        from custom_components.aegis_ajax.sensor import AjaxDevicePowerSensor
+
+        coordinator = self._make_coordinator(device_type="socket_outlet_type_e", power_w=15)
+        sensor = AjaxDevicePowerSensor(coordinator, "311B058D")
+        assert sensor.entity_registry_enabled_default is True
+
+    def test_direct_power_sensor_unique_id_distinct_from_derived(self) -> None:
+        # `_power` (Outlet) vs `_power_derived` (WallSwitch) — separate
+        # entity registry entries so users running both families don't
+        # collide.
+        from custom_components.aegis_ajax.sensor import (
+            AjaxDeviceDerivedPowerSensor,
+            AjaxDevicePowerSensor,
+        )
+
+        coordinator_outlet = self._make_coordinator(device_type="socket_outlet_type_e", power_w=15)
+        coordinator_ws = self._make_coordinator(device_type="wall_switch")
+        outlet_sensor = AjaxDevicePowerSensor(coordinator_outlet, "311B058D")
+        ws_sensor = AjaxDeviceDerivedPowerSensor(coordinator_ws, "311B058D")
+        assert outlet_sensor.unique_id == "aegis_ajax_311B058D_power"
+        assert ws_sensor.unique_id == "aegis_ajax_311B058D_power_derived"
 
     @pytest.mark.asyncio
     async def test_native_value_falls_back_to_restored_when_no_live_reading(self) -> None:

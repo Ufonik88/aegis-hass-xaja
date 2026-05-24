@@ -378,6 +378,9 @@
             },
             "power_derived": {
                 "name": "Vermogen"
+            },
+            "power": {
+                "name": "Vermogen"
             }
         },
         "switch": {

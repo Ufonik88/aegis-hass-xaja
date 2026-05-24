@@ -394,6 +394,9 @@
             },
             "power_derived": {
                 "name": "Power"
+            },
+            "power": {
+                "name": "Power"
             }
         },
         "switch": {
