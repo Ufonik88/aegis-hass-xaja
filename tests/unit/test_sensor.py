@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -889,3 +889,81 @@ class TestAjaxDeviceElectricalSensors:
             AjaxDeviceDerivedPowerSensor(coordinator, "311B058D")._attr_unique_id,
         }
         assert len(uids) == 4
+
+
+class TestRemoveOrphanOutletPowerDerived:
+    """Migration: drop legacy `_power_derived` entity for Outlet devices (#179)."""
+
+    @staticmethod
+    def _make_coordinator(devices: dict[str, str]) -> MagicMock:
+        from custom_components.aegis_ajax.api.models import Device
+
+        coordinator = MagicMock()
+        coordinator.devices = {
+            device_id: Device(
+                id=device_id,
+                hub_id="002B1A51",
+                name=f"Device {device_id}",
+                device_type=device_type,
+                room_id=None,
+                group_id=None,
+                state=DeviceState.ONLINE,
+                malfunctions=0,
+                bypassed=False,
+                statuses={},
+                battery=None,
+            )
+            for device_id, device_type in devices.items()
+        }
+        return coordinator
+
+    def test_removes_orphan_only_for_outlet_devices(self) -> None:
+        from custom_components.aegis_ajax.sensor import _remove_orphan_outlet_power_derived
+
+        coordinator = self._make_coordinator(
+            {
+                "OUTLET_E": "socket_outlet_type_e",
+                "OUTLET_F": "socket_outlet_type_f",
+                "WALLSWITCH": "wall_switch",
+                "MOTION": "motion_protect",
+            }
+        )
+
+        # Fake registry: tracks unique_id → entity_id and records removals.
+        removed: list[str] = []
+
+        def async_get_entity_id(domain: str, platform: str, unique_id: str) -> str | None:
+            assert domain == "sensor"
+            assert platform == "aegis_ajax"
+            # Pretend every device has BOTH a `_power` and `_power_derived`
+            # entity registered from a previous version.
+            if unique_id.endswith("_power_derived"):
+                return f"sensor.{unique_id}"
+            return None
+
+        registry = MagicMock()
+        registry.async_get_entity_id.side_effect = async_get_entity_id
+        registry.async_remove.side_effect = removed.append
+
+        with patch("homeassistant.helpers.entity_registry.async_get", return_value=registry):
+            _remove_orphan_outlet_power_derived(MagicMock(), coordinator)
+
+        assert sorted(removed) == [
+            "sensor.aegis_ajax_OUTLET_E_power_derived",
+            "sensor.aegis_ajax_OUTLET_F_power_derived",
+        ]
+        # WallSwitch's own `_power_derived` is the canonical entity for
+        # that family; must not be removed.
+        assert "sensor.aegis_ajax_WALLSWITCH_power_derived" not in removed
+
+    def test_no_op_when_orphan_already_absent(self) -> None:
+        from custom_components.aegis_ajax.sensor import _remove_orphan_outlet_power_derived
+
+        coordinator = self._make_coordinator({"OUTLET_E": "socket_outlet_type_e"})
+        registry = MagicMock()
+        registry.async_get_entity_id.return_value = None  # Fresh install: nothing to remove.
+
+        with patch("homeassistant.helpers.entity_registry.async_get", return_value=registry):
+            _remove_orphan_outlet_power_derived(MagicMock(), coordinator)
+
+        registry.async_remove.assert_not_called()

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.3-beta.12] - 2026-05-25
+
+### Changed
+- **FCM `API_KEY_ANDROID_APP_BLOCKED` warning now names the real cause** (#182 follow-up). Empirical confirmation from @alt-BadBatch on beta.2 (a release that does NOT send the `X-Android-Package` header at all) showed that registration succeeds for the standard `com.ajaxsystems` build — which means Google's api-key for that Firebase project is NOT package-restricted. The 403 that other users (@zwagerzaken, @aitrus22) keep hitting is therefore not a header issue; it's the wrong `AIza…` value altogether. Inspection of the official Ajax 3.47 + PRO 2.47 APKs confirms `libnative-lib.so` ships **two** `AIza…` strings — one is FCM-scoped and accepted by Firebase Installations, the other is for a different Google service (Maps key has its own slot in `strings.xml`) and gets refused. A user who grabs the first `AIza…` they see has a 50/50 chance of picking the wrong one. The `_classify_fcm_failure` branch now names the wrong-AIza-string cause specifically and points at the README's [Where the values live](https://github.com/bvis/aegis-hass#where-the-values-live) section, which has been updated with a `strings | grep` recipe and an explicit "try each one through the Repair flow" note. Three intermediate betas (`1.5.3-beta.4..7`) had iterated on the wrong paste-truncation premise; that path turned out to address a different (rarer) failure mode but never could have unblocked the wrong-key case.
+- **Orphan `_power_derived` sensors for Outlet Type E / F devices are now removed automatically on setup** (#179 follow-up). Between `1.4.0` (when the WallSwitch family's derived-power entity first shipped) and `1.5.3-beta.1` (when the Outlet was excluded from `ELECTRICAL_DEVICE_TYPES` while we figured out its sub-key map), Outlet devices got a `_power_derived` entity registered with WallSwitch-shaped (and incorrect) parsing behind it. `1.5.3-beta.11` introduced a real direct-reading `_power` entity for these devices, but the legacy `_power_derived` lingered in the entity registry as `unavailable` until users deleted it by hand. The new helper sweeps the registry once per setup and removes the orphan; WallSwitch family's own `_power_derived` is untouched.
+
 ## [1.5.3-beta.11] - 2026-05-25
 
 ### Added

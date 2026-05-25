@@ -857,15 +857,16 @@ class TestClassifyFcmFailure:
         for forbidden in ("APK", "cobrand", "libnative", "strings.xml"):
             assert forbidden not in msg
 
-    def test_fcm_install_failure_points_at_app_id_format(self) -> None:
-        # Probe result: emitted when the Firebase Installation API rejects the
-        # request with HTTP 400 INVALID_ARGUMENT, which empirically only fires
-        # when `fcm_app_id` is malformed enough that Firebase cannot parse it.
-        # Other shapes (bad api_key, wrong project_id) surface as the
-        # subscription branch above.
+    def test_fcm_install_failure_points_at_wrong_aiza_string(self) -> None:
+        # Empirical: this branch fires when Firebase returns 403
+        # API_KEY_ANDROID_APP_BLOCKED. After @alt-BadBatch / @zwagerzaken's
+        # #182 data points, we know the most common cause is the user
+        # picking a non-FCM `AIza...` string from the APK's native lib
+        # (Maps / ML Kit). Surface that explanation so future users
+        # don't go down the paste-truncation rabbit hole.
         msg = _classify_fcm_failure(RuntimeError("Unable to register with fcm"))
-        assert "fcm_app_id" in msg
-        assert "1:" in msg and "sender" in msg  # the format hint
+        assert "API_KEY_ANDROID_APP_BLOCKED" in msg
+        assert "AIza" in msg  # the wrong-string explanation
         assert "Repair card" in msg
 
     def test_gcm_checkin_failure_points_at_network(self) -> None:

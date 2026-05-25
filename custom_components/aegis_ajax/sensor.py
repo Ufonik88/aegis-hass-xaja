@@ -171,6 +171,7 @@ async def async_setup_entry(
 
     # Per-device electrical sensors for WallSwitch / Socket family (#123)
     # and Outlet Type E / F (#179, calibrated in 1.5.3-beta.11).
+    _remove_orphan_outlet_power_derived(hass, coordinator)
     for device_id, device in coordinator.devices.items():
         if device.device_type in ELECTRICAL_DEVICE_TYPES:
             entities.append(AjaxDeviceCurrentSensor(coordinator, device_id))
@@ -182,6 +183,44 @@ async def async_setup_entry(
                 entities.append(AjaxDeviceDerivedPowerSensor(coordinator, device_id))
 
     async_add_entities(entities)
+
+
+def _remove_orphan_outlet_power_derived(
+    hass: HomeAssistant, coordinator: AjaxCobrandedCoordinator
+) -> None:
+    """Drop the `_power_derived` entity for Outlet Type E / F devices (#179).
+
+    Between `1.4.0` (when the WallSwitch family's derived-power entity
+    first shipped) and `1.5.3-beta.1` (when the Outlet was excluded
+    from `ELECTRICAL_DEVICE_TYPES` while we figured out its sub-key
+    map), users on Outlets got a `_power_derived` entity registered
+    with WallSwitch-shaped (and incorrect) parsing behind it. From
+    `1.5.3-beta.11` the Outlet emits a real `_power` sensor instead;
+    the legacy `_power_derived` lingers in the entity registry as
+    `unavailable` until the user deletes it by hand. This helper
+    sweeps the registry once per setup and removes it cleanly.
+    Touches only devices currently in `DIRECT_POWER_DEVICE_TYPES`;
+    WallSwitch family's own `_power_derived` is untouched.
+    """
+    from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
+
+    registry = er.async_get(hass)
+    removed = 0
+    for device_id, device in coordinator.devices.items():
+        if device.device_type not in DIRECT_POWER_DEVICE_TYPES:
+            continue
+        unique_id = f"aegis_ajax_{device_id}_power_derived"
+        entity_id = registry.async_get_entity_id("sensor", "aegis_ajax", unique_id)
+        if entity_id is None:
+            continue
+        registry.async_remove(entity_id)
+        removed += 1
+    if removed:
+        _LOGGER.info(
+            "Removed %d orphan `_power_derived` sensor(s) for Outlet devices — "
+            "superseded by direct `_power` entity in 1.5.3-beta.11",
+            removed,
+        )
 
 
 class AjaxSensor(CoordinatorEntity[AjaxCobrandedCoordinator], SensorEntity):

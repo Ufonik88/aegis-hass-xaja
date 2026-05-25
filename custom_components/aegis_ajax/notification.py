@@ -166,10 +166,14 @@ def _classify_fcm_failure(exc: BaseException) -> str:
         )
     if "unable to register with fcm" in lower:
         return (
-            "Firebase rejected the app credentials. Most likely fcm_app_id has "
-            'an invalid format — the expected shape is "1:<numeric sender>:'
-            '<platform>:<hex suffix>". Re-check the value entered via the '
-            "Repair card under Settings → Repairs."
+            "Firebase Installations refused the api-key for this Android package "
+            "(HTTP 403 API_KEY_ANDROID_APP_BLOCKED). The Ajax APK's native library "
+            "usually contains several `AIza…` strings — one for FCM and one or more "
+            "for Google Maps / ML Kit. Only the FCM-scoped key is accepted here. "
+            "If you extracted just the first `AIza…` you found, try the others via "
+            "the Repair card under Settings → Repairs. See "
+            "https://github.com/bvis/aegis-hass#where-the-values-live for the "
+            "extraction guide."
         )
     if "unable to register and check in to gcm" in lower:
         return (

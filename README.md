@@ -388,6 +388,8 @@ Once readable, three of the four values appear as named entries:
 
 The fourth, `google_api_key`, is **not** in `strings.xml` (the entry there is a placeholder string); it ships inside the native library bundled with the APK at `lib/<arch>/libnative-lib.so`. The value starts with `AIza` and is exactly 39 characters long, so it's easy to spot when scanning printable strings out of the binary.
 
+> **Watch out — the native library typically contains more than one `AIza…` string.** Google Cloud SDKs share the same key format across services, and an Ajax APK can ship a separate key for FCM, another for ML Kit, and so on; only the **FCM-scoped** one is what Firebase Installations accepts. There is no label next to the keys to tell them apart. The pragmatic recipe is to list every match (`strings libnative-lib.so | grep -oE 'AIza[A-Za-z0-9_-]+' | sort -u`) and try each one through the integration's Repair flow until registration succeeds. If you get `Push notifications disabled — FCM credentials rejected by Google` with the warning text mentioning `API_KEY_ANDROID_APP_BLOCKED`, that's the signal you've picked a non-FCM key — pull the next candidate from the list and retry.
+
 > **Using the Ajax app on iPhone?** The iOS build ships these values in `GoogleService-Info.plist` inside the signed `.ipa` bundle, which is encrypted and unreadable without a jailbroken device. The Firebase project is identical on both platforms, so extract the four values from the Android APK regardless of which OS you use day-to-day — pulled from the Android build, they work for FCM push delivery on a Home Assistant install on any phone OS.
 
 ### Sanity-check before submitting
