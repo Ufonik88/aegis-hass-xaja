@@ -137,6 +137,9 @@ class AjaxCobrandedCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._streams_started: bool = False
         self._event_entities: dict[str, Any] = {}
         self.last_photo_urls: dict[str, str] = {}
+        # Channel preview image URLs keyed by device_id (Phase 2)
+        self.video_preview_urls: dict[str, str] = {}
+        self._preview_urls_last_fetch: float = 0.0
         # space_id -> (expiry_time, security_state)
         self._optimistic_space_states: dict[str, tuple[float, Any]] = {}
         # SIM info is mostly static — cache and refresh once per hour
@@ -260,6 +263,7 @@ class AjaxCobrandedCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._update_hub_offline_repairs(now)
             await self._maybe_refresh_sim_and_firmware(now)
             await self._maybe_refresh_rooms(now)
+            await self._maybe_refresh_preview_urls(now)
             if not self._streams_started:
                 await self._first_startup_init()
                 return {"spaces": self.spaces, "devices": self.devices}
@@ -428,6 +432,29 @@ class AjaxCobrandedCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
         self.rooms = refreshed_rooms
         self._rooms_last_fetch = now
+
+    async def _maybe_refresh_preview_urls(self, now: float) -> None:
+        """Refresh channel preview image URLs every 120 seconds.
+
+        Opens a short-lived stream to VideoEdgeService/streamUpdates to
+        capture the current preview snapshot for each video edge channel.
+        Preview URLs change infrequently (only when the NVR generates a
+        new snapshot), so a 120 s interval is conservative.
+        """
+        preview_refresh_interval = 120.0
+        if now - self._preview_urls_last_fetch <= preview_refresh_interval:
+            return
+        for space_id in self.spaces:
+            try:
+                urls = await self._video_api.get_channel_preview_urls(space_id)
+                self.video_preview_urls.update(urls)
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug(
+                    "Failed to refresh preview URLs for space %s",
+                    space_id,
+                    exc_info=True,
+                )
+        self._preview_urls_last_fetch = now
 
     async def _first_startup_init(self) -> None:
         """First-cycle bootstrap: warm devices cache, start persistent

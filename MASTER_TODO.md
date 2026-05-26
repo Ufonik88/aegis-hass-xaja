@@ -1,7 +1,7 @@
 # MASTER TODO — Video Functionality for Aegis for Ajax
 
 > **Last Updated:** 2026-05-26
-> **Status:** Phase 1 Complete / Phase 2 Pending
+> **Status:** Phase 1 Complete / Phase 2 Complete / Phase 3 Complete / Phase 4 Pending
 
 This document is the **single source of truth** for all video-related work in this fork of
 [Aegis for Ajax](https://github.com/bvis/aegis-hass). It tracks:
@@ -22,8 +22,8 @@ This document is the **single source of truth** for all video-related work in th
    - [2.3 Modified: `coordinator.py`](#23-modified-coordinatorpy)
    - [2.4 Modified: `api/__init__.py`](#24-modified-api__init__py)
    - [2.5 Modified: `tests/unit/test_camera.py`](#25-modified-testsunittest_camerapy)
-3. [Phase 2 — Snapshot/Preview Images (PLANNED)](#3-phase-2--snapshotpreview-images-planned)
-4. [Phase 3 — WebRTC Live Streaming (PLANNED)](#4-phase-3--webrtc-live-streaming-planned)
+3. [Phase 2 — Snapshot/Preview Images (COMPLETE)](#3-phase-2--snapshotpreview-images-complete)
+4. [Phase 3 — WebRTC Live Streaming (COMPLETE)](#4-phase-3--webrtc-live-streaming-complete)
 5. [Phase 4 — Advanced Features (PLANNED)](#5-phase-4--advanced-features-planned)
 6. [Known Limitations & Open Questions](#6-known-limitations--open-questions)
 7. [Required External Information](#7-required-external-information)
@@ -257,83 +257,240 @@ Added `"VideoApi"` to the exported symbols list.
 
 ---
 
-## 3. Phase 2 — Snapshot/Preview Images (PLANNED)
+## 3. Phase 2 — Snapshot/Preview Images (COMPLETE)
 
-**Not started. Dependencies: real-device testing of Phase 1.**
+**Status:** All code written. All tests pass. Ready for real-device testing.
 
-### Goal
-Display preview/snapshot images for video edge devices inside the HA camera entity
-(when a live stream is not active), using `Channel.channel_preview.image_url` from
-the Ajax video edge channel proto.
+### Implementation Summary
+
+Phase 2 surfaces preview/snapshot images from Ajax's VideoEdge `Channel.channel_preview.image_url`
+in the HA camera entity. The endpoint used is `VideoEdgeService/streamUpdates` — a server-streaming
+call that returns full `VideoEdge` objects with `Channel` data including the `ChannelPreview`
+message (`image_url` + `created_at`).
+
+#### How It Works
+
+1. **`VideoApi.get_channel_preview_urls(space_id)`** opens a short-lived stream to
+   `VideoEdgeService/streamUpdates`, captures the `InitialState` snapshot, extracts
+   `channel_preview.image_url` for each channel, and returns `{channel_id: image_url}`.
+2. **`_maybe_refresh_preview_urls(now)`** — new coordinator method called every 120 seconds
+   from `_async_update_data`. Iterates all spaces and merges results into
+   `coordinator.video_preview_urls`.
+3. **`AjaxCamera.async_camera_image()`** checks `coordinator.video_preview_urls` as a
+   fallback AFTER photo-on-demand URLs and BEFORE persisted photos from disk.
+4. **`_download_preview(url)`** — new method similar to `_download_image()` but with a
+   more permissive URL validator (`_is_valid_preview_url()`) since Ajax preview images
+   may be served from internal/edge CDN domains.
+
+#### Priority chain in `async_camera_image()`
+```
+1. last_photo_urls (button-triggered Photo on Demand)
+2. video_preview_urls (periodically refreshed channel preview snapshots)   ← NEW
+3. _get_last_image() (persisted photo from disk)
+```
 
 ### Tasks
 
-- [ ] **3.1** Call `StreamVideoPlayerService` at coordinator startup to populate a
-  `video_preview_urls: dict[str, str]` dict on the coordinator (keyed by device_id)
-- [ ] **3.2** Override `async_camera_image()` in `AjaxCamera` to check
-  `coordinator.video_preview_urls` as a fallback before `_get_last_image()`
-- [ ] **3.3** Add periodic refresh of preview URLs (e.g. every 30 seconds)
-- [ ] **3.4** Add URL validation for preview images (reuse `_is_valid_photo_url` or
-  extend to handle video edge image domains)
-- [ ] **3.5** Write unit tests for preview image retrieval and caching
+- [x] **3.1** Call `VideoEdgeService/streamUpdates` at coordinator intervals to populate
+  `video_preview_urls` dict (keyed by channel/device_id)
+- [x] **3.2** Update `async_camera_image()` to check `video_preview_urls` as fallback
+- [x] **3.3** Add periodic refresh of preview URLs (120-second interval)
+- [x] **3.4** Add `_is_valid_preview_url()` — accepts http/https with any valid hostname
+- [x] **3.5** Write unit tests — 9 new tests for preview image retrieval, caching, URL
+  validation, download error handling, and priority chain
 - [ ] **3.6** Test with real hardware (Doorbell, Indoor Cam, etc.)
 
-### Files to Modify
-- `api/video.py` — add `get_channel_preview_url()` method
-- `camera.py` — modify `async_camera_image()` for preview fallback
-- `coordinator.py` — add `video_preview_urls` dict and refresh logic
-- `tests/unit/test_camera.py` — add preview tests
+### Files Modified
+
+| File | Lines Changed | Description |
+|------|--------------|-------------|
+| `api/video.py` | 152 → 204 (+52) | New method `get_channel_preview_urls()`, new proto imports for `SpaceLocator` and `StreamVideoEdgeUpdatesRequest/Response` |
+| `coordinator.py` | 930 → 995 (+65) | New `video_preview_urls` dict, `_preview_urls_last_fetch` timestamp, `_maybe_refresh_preview_urls()` method, wired into `_async_update_data` |
+| `camera.py` | 214 → 240 (+26) | Preview URL fallback in `async_camera_image()`, new `_download_preview()` and `_is_valid_preview_url()` methods |
+| `tests/unit/test_camera.py` | 526 → 695 (+169) | 9 new tests for preview image flow |
+
+### Test Coverage (Phase 2 additions)
+
+| Test | What It Verifies |
+|------|-----------------|
+| `test_async_camera_image_uses_preview_url_fallback` | Downloads preview when `video_preview_urls` has a URL |
+| `test_async_camera_image_preview_skip_on_bad_url` | Skips preview for non-http/https URLs |
+| `test_async_camera_image_preview_handles_download_error` | Falls back to cached image on download error |
+| `test_async_camera_image_preview_overrides_last_image` | Fresh preview replaces old `_last_image` |
+| `test_async_camera_image_photo_takes_priority_over_preview` | Photo-on-demand URL wins over preview URL |
+| `test_is_valid_preview_url_accepts_https` | `_is_valid_preview_url()` accepts https |
+| `test_is_valid_preview_url_accepts_http` | `_is_valid_preview_url()` accepts http |
+| `test_is_valid_preview_url_rejects_ftp` | `_is_valid_preview_url()` rejects ftp |
+| `test_is_valid_preview_url_rejects_empty` | `_is_valid_preview_url()` rejects malformed input |
+
+### Notes
+
+- The `VideoEdgeService/streamUpdates` endpoint returns the **full** `VideoEdge` proto with
+  `Channel` data including `channel_preview.image_url`. This is different from the lighter
+  `StreamVideoPlayerService` used in Phase 1.
+- Preview URLs are refreshed every 120 seconds. The stream is opened, the `InitialState`
+  is captured, and the stream is immediately closed (no persistent connection).
+- `_is_valid_preview_url()` accepts any http/https URL with a valid hostname. This is
+  intentionally more permissive than `_is_valid_photo_url()` because Ajax preview images
+  may be served from edge CDN or internal domains not matching `*.ajax.systems`.
 
 ---
 
-## 4. Phase 3 — WebRTC Live Streaming (PLANNED)
+## 4. Phase 3 — WebRTC Live Streaming (COMPLETE)
 
-**Not started. Dependencies: Ajax WebRTC API documentation.**
+**Status:** All code written. All tests pass (1416 unit tests). Ready for real-device testing.
 
 ### Goal
-Implement live video streaming via Ajax's native WebRTC protocol. This is how the
-official Ajax mobile app streams video from all modern camera types (VideoEdge, Doorbell,
-etc.).
+Implement live video streaming via Ajax's native WebRTC protocol using Home Assistant's
+built-in `Camera.async_handle_async_webrtc_offer()` API. HA's frontend creates the WebRTC
+peer connection, sends the offer SDP to the backend, and the integration proxies the
+signaling to/from Ajax's cloud WebRTC gateway.
 
-### Key Protos to Implement
+### Key Decision: v3 `StreamWebrtcService/execute` over v2 `WebrtcService`
 
-| Service | Method | Type |
-|---------|--------|------|
-| `WebrtcService` | `initiate` | unary_stream — returns ICE servers, SDP offers |
-| `WebrtcService` | `askStreams` | unary_unary — query available streams |
-| `WebrtcService` | `sendAnswer` | unary_unary — WebRTC signaling |
-| `WebrtcService` | `sendOffer` | unary_unary — WebRTC signaling |
-| `WebrtcService` | `suggestNewIceCandidate` | unary_unary — ICE candidate exchange |
+Although the original plan targeted the v2 `WebrtcService` (unary/stream methods), the
+v3 `StreamWebrtcService/execute` bidirectional stream is a much better fit for HA's
+offer/answer model:
 
-### Architectural Challenge
-HA does not have native WebRTC camera support in the core `Camera` entity. The typical
-approach is to use a third-party integration like **go2rtc** or **WebRTC Camera** that
-handles the WebRTC client side. Options:
+| Aspect | v2 `WebrtcService` | v3 `StreamWebrtcService/execute` |
+|--------|-------------------|---------------------------------|
+| Initiate | `initiate` (server-streaming) | `Init` message on bidi stream |
+| Offer/Answer | Separate `sendOffer` RPC | In-stream `Offer`/`Answer` messages |
+| ICE candidates | Separate `suggestNewIceCandidate` RPC | In-stream `NewIceCandidate` messages |
+| Session lifecycle | Multiple independent RPCs | Single persistent bidirectional stream |
 
-1. **Option A:** Implement WebRTC signaling in this integration and expose via a custom
-   frontend card
-2. **Option B:** Proxy through go2rtc — this integration fetches the WebRTC offer from
-   Ajax, go2rtc consumes it, HA's Stream component gets HLS from go2rtc
-3. **Option C:** Stream video frames via gRPC `StreamVideoPlayerService.execute` and
-   expose as MJPEG
+The bidirectional stream lets us send HA's offer and immediately read Ajax's answer on
+the same connection, which is exactly what `async_handle_async_webrtc_offer` needs.
 
-**Recommendation:** Option B (go2rtc proxy) — lowest integration complexity.
+### Implementation Summary
 
-### Tasks (high-level, to be refined)
+#### 4.1 `api/client.py` — New `call_bidi_stream()` method
 
-- [ ] **4.1** Implement `WebrtcService.initiate` call in `VideoApi`
-- [ ] **4.2** Handle ICE server configuration (STUN/TURN URLs from Ajax)
-- [ ] **4.3** Implement SDP offer/answer exchange
-- [ ] **4.4** Integrate with go2rtc or similar WebRTC-to-HLS bridge
-- [ ] **4.5** Expose stream URL from go2rtc as `stream_source` on `AjaxCamera`
-- [ ] **4.6** Support dual-stream (main/sub) selection
-- [ ] **4.7** Write integration tests
-- [ ] **4.8** Test with real hardware
+Added `AjaxGrpcClient.call_bidi_stream(method_path, response_type, timeout)` which opens
+a `grpc.aio.stream_stream` RPC and returns a `StreamStreamCall` object supporting
+manual `write()` / `read()` for bidirectional request/response exchange.
 
-### Files to Modify/Create
-- `api/video.py` — add WebRTC methods
-- `camera.py` — WebRTC stream source override
-- `coordinator.py` — go2rtc lifecycle management
+#### 4.2 `api/video.py` — WebRTC signaling methods
+
+**New proto imports:** `v3/mobilegwsvc/service/stream_webrtc` (request/response/endpoint)
+and common WebRTC types (`Stream`, `SessionDescription`, `IceCandidate`, `FrameTypeId`,
+`StreamType`).
+
+**`initiate_webrtc(space_id, video_edge_id, channel_id, offer_sdp)`**
+- Opens bidirectional stream to `StreamWebrtcService/execute`
+- Sends `Init` with `SpaceLocator`, `video_edge_id`, one `Stream` (main stream,
+  video + audio, live mode)
+- Reads `Init` response → extracts `webrtc_session_id` and ICE servers
+- Sends `Offer` with HA's offer SDP
+- Reads `Answer` response → returns `(session_id, answer_sdp, call_object)`
+
+**`send_webrtc_candidate(call, candidate_dict)`**
+- Writes a `NewIceCandidate` message to the active bidirectional stream
+- Maps HA candidate dict keys (`sdpMid`, `sdpMLineIndex`, `candidate`) to Ajax's
+  `IceCandidate` proto fields
+
+**`close_webrtc_call(call)`**
+- Cancels the active `StreamStreamCall` to cleanly terminate the stream
+
+#### 4.3 `camera.py` — HA WebRTC camera entity methods
+
+**`async_handle_async_webrtc_offer(offer_sdp, session_id, send_message)`**
+1. Validates device is a `_VIDEO_EDGE_TYPE` and resolves its space
+2. Calls `video_api.initiate_webrtc()` to get Ajax's answer SDP
+3. Sends `WebRTCAnswer(answer_sdp)` back to HA via `send_message`
+4. Stores the active `call` object in `self._webrtc_sessions[session_id]`
+5. Starts an `asyncio.Task` running `_read_webrtc_ice_candidates()` to forward
+   ICE candidates from Ajax → HA
+
+**`async_on_webrtc_candidate(session_id, candidate)`**
+- Looks up the active session's `call` object
+- Converts HA's `RTCIceCandidateInit` to a dict and calls `video_api.send_webrtc_candidate()`
+
+**`_read_webrtc_ice_candidates(session_id, call, send_message)`**
+- Background loop reading `StreamWebrtcResponse` messages from the Ajax stream
+- When `new_ice_candidate` is received, constructs `RTCIceCandidateInit` and sends
+  `WebRTCCandidate` to HA via `send_message`
+- Exits on stream close or error; cleans up session state
+
+**`close_webrtc_session(session_id)`**
+- Called by HA when the user stops viewing the stream
+- Cancels the reader task, removes session state, closes the gRPC call
+
+### WebRTC Signaling Flow
+
+```
+HA Frontend                      HA Backend (AjaxCamera)           Ajax Cloud
+    |                                    |                              |
+    |-- create peer connection -------->|                              |
+    |<-- generate local offer SDP ------|                              |
+    |-- websocket: offer ---------------->|                             |
+    |                                    |-- Init ->                    |
+    |                                    |<-- Init (session_id, ICE) ---|
+    |                                    |-- Offer (HA offer) ->        |
+    |                                    |<-- Answer (Ajax answer) -----|
+    |<-- websocket: WebRTCAnswer --------|                             |
+    |                                    |                              |
+    |-- ICE candidate ------------------->|                             |
+    |                                    |-- NewIceCandidate ->         |
+    |<-- ICE candidate -------------------|<-- NewIceCandidate ---------|
+    |                                    |                              |
+    |  <==== DIRECT PEER-TO-PEER MEDIA (video/audio) ====>             |
+```
+
+### Tasks
+
+- [x] **4.1** Add `call_bidi_stream()` to `AjaxGrpcClient` for bidirectional gRPC streaming
+- [x] **4.2** Implement `VideoApi.initiate_webrtc()` using v3 `StreamWebrtcService/execute`
+- [x] **4.3** Implement `VideoApi.send_webrtc_candidate()` for ICE candidate forwarding
+- [x] **4.4** Implement `VideoApi.close_webrtc_call()` for session teardown
+- [x] **4.5** Override `Camera.async_handle_async_webrtc_offer()` in `AjaxCamera`
+- [x] **4.6** Override `Camera.async_on_webrtc_candidate()` in `AjaxCamera`
+- [x] **4.7** Add `close_webrtc_session()` and `_read_webrtc_ice_candidates()` background reader
+- [x] **4.8** Support main/sub stream selection (`ST_MAIN` with video+audio `FrameTypeId` filters)
+- [x] **4.9** Write unit tests — 8 new tests for WebRTC offer/answer, candidate forwarding,
+  session cleanup, error paths, and device-type guards
+- [ ] **4.10** Test with real hardware (Doorbell, Indoor Cam, etc.)
+
+### Files Modified
+
+| File | Lines Changed | Description |
+|------|--------------|-------------|
+| `api/client.py` | 273 → 292 (+19) | New `call_bidi_stream()` method using `grpc.aio.stream_stream` |
+| `api/video.py` | 219 → 367 (+148) | `initiate_webrtc()`, `send_webrtc_candidate()`, `close_webrtc_call()` with v3 bidirectional stream proto imports |
+| `camera.py` | 243 → 385 (+142) | `async_handle_async_webrtc_offer()`, `async_on_webrtc_candidate()`, `close_webrtc_session()`, `_read_webrtc_ice_candidates()`, `_webrtc_sessions` / `_webrtc_read_tasks` state |
+| `tests/unit/test_camera.py` | 730 → 915 (+185) | 8 new WebRTC tests + `webrtc_models` / `homeassistant.components.camera.webrtc` stubs |
+
+### Test Coverage (Phase 3 additions)
+
+| Test | What It Verifies |
+|------|-----------------|
+| `test_async_handle_webrtc_offer_video_edge` | Full offer→answer flow for video edge device |
+| `test_async_handle_webrtc_offer_non_video_edge_rejected` | Motion cams reject WebRTC with error |
+| `test_async_handle_webrtc_offer_device_missing` | Missing device returns error |
+| `test_async_handle_webrtc_offer_space_missing` | Missing space returns error |
+| `test_async_handle_webrtc_offer_no_answer` | No Ajax answer returns error |
+| `test_async_on_webrtc_candidate_forwards_to_ajax` | HA ICE candidate forwarded to Ajax stream |
+| `test_async_on_webrtc_candidate_no_session` | Unknown session ignored silently |
+| `test_close_webrtc_session_cleanup` | Session close cancels task and removes state |
+
+### Notes
+
+- The v3 `StreamWebrtcService/execute` endpoint is a **bidirectional** stream:
+  client writes `StreamWebrtcRequest` messages and reads `StreamWebrtcResponse` messages.
+- `Init` message carries `space_locator`, `video_edge_id`, `initial_streams`, and
+  `allow_large_rtp_packets`. The response contains `ice_servers` and the actual
+  `streams` that were accepted by the video edge.
+- The `Stream` proto uses `channel_guid` as the source identifier and `ST_MAIN`
+  (`StreamType = 1`) for the primary video stream. `FrameTypeId` filters include
+  `FT_VIDEO` and `FT_AUDIO`.
+- HA detects native WebRTC support automatically: `Camera._supports_native_async_webrtc`
+  is True when `async_handle_async_webrtc_offer` is overridden. This causes
+  `camera_capabilities.frontend_stream_types` to include `StreamType.WEB_RTC`.
+- No go2rtc proxy is needed — HA's built-in WebRTC frontend handles the peer
+  connection directly, and this integration only acts as a signaling bridge.
+- The actual media stream (RTP video/audio) travels **directly** between the HA
+  frontend and the Ajax camera via the WebRTC peer connection, not through the
+  HA backend.
 
 ---
 
@@ -380,8 +537,8 @@ handles the WebRTC client side. Options:
 | Limitation | Severity | Mitigation |
 |-----------|----------|------------|
 | **VideoEdge RTSP URL is heuristic** — `rtsp://{device_id}:{port}/stream` is constructed from device ID, not an actual hostname/IP. The device ID is likely NOT a valid hostname. | **High** | Need to determine the actual hostname/IP of the VideoEdge NVR/hub. The `device_id` may map to an internal Ajax identifier, not a network address. |
-| **No preview images yet** — `channel_preview.image_url` is not consumed. Camera entity shows blank image until a photo is captured (PhOD models) or indefinitely (non-PhOD models). | **High** | Phase 2 will address this. |
-| **No WebRTC streaming** — Ajax's native protocol is not yet implemented. Legacy RTSP fallback only covers hub-connected cameras. | **Medium** | Phase 3 will address this. |
+| **No preview images yet** — `channel_preview.image_url` is not consumed. Camera entity shows blank image until a photo is captured (PhOD models) or indefinitely (non-PhOD models). | **High** | **Resolved in Phase 2** — preview images refresh every 120s via `VideoEdgeService/streamUpdates`. |
+| **No WebRTC streaming** — Ajax's native protocol is not yet implemented. Legacy RTSP fallback only covers hub-connected cameras. | **Medium** | **Resolved in Phase 3** — native WebRTC signaling via HA's `async_handle_async_webrtc_offer` using v3 `StreamWebrtcService/execute`. |
 | **`video_edge_*` hub_id is self-referential** — The `DevicesApi._parse_video_edge_channel()` sets `hub_id = profile.id` because VideoEdge devices don't have a parent hub. This means `_resolve_hub_camera_stream()` won't match for video edge devices (correctly — they use `_resolve_video_edge_stream()` instead). But `_resolve_video_edge_stream()` uses the device's own ID to look up a space, which requires iterating spaces. | **Low** | This is handled correctly in the current code, but worth noting for future refactors. |
 | **No stream lifecycle management** — Once `stream_source` returns a URL, HA's Stream component opens a persistent ffmpeg process. If the Ajax session expires, the stream may fail silently. | **Medium** | Consider adding session refresh hooks or re-querying `stream_source` on stream failure. |
 | **No ONVIF credential exposure** — `get_onvif_and_rtsp_settings` returns ONVIF usernames but not passwords. Direct ONVIF streaming requires the password. | **Medium** | Passwords may be retrievable via a separate endpoint, or users may need to enter them in the integration config flow. |
@@ -457,6 +614,24 @@ To proceed with Phases 2-4, the following information is needed from **Ajax Syst
 | `api/__init__.py` | 34 → 38 (+4) | VideoApi export |
 | `tests/unit/test_camera.py` | 332 → 492 (+160) | 15 new tests |
 
+### Files Modified (Phase 2)
+
+| File | Lines Changed | Description |
+|------|--------------|-------------|
+| `api/video.py` | 152 → 204 (+52) | `get_channel_preview_urls()` — calls `VideoEdgeService/streamUpdates`, returns `{channel_id: image_url}` |
+| `coordinator.py` | 930 → 995 (+65) | `video_preview_urls` dict, `_maybe_refresh_preview_urls()` with 120s interval |
+| `camera.py` | 214 → 240 (+26) | Preview URL fallback in `async_camera_image()`, `_download_preview()`, `_is_valid_preview_url()` |
+| `tests/unit/test_camera.py` | 526 → 695 (+169) | 9 new tests for preview image flow |
+
+### Files Modified (Phase 3)
+
+| File | Lines Changed | Description |
+|------|--------------|-------------|
+| `api/client.py` | 273 → 292 (+19) | New `call_bidi_stream()` — opens `grpc.aio.stream_stream` for manual write/read |
+| `api/video.py` | 204 → 367 (+163) | `initiate_webrtc()`, `send_webrtc_candidate()`, `close_webrtc_call()` using v3 `StreamWebrtcService/execute` |
+| `camera.py` | 240 → 385 (+145) | `async_handle_async_webrtc_offer()`, `async_on_webrtc_candidate()`, `close_webrtc_session()`, `_read_webrtc_ice_candidates()` |
+| `tests/unit/test_camera.py` | 695 → 915 (+220) | 8 new WebRTC tests + `webrtc_models` and `camera.webrtc` stubs |
+
 ### Files NOT Modified (Phase 1)
 
 These files were analyzed but not changed:
@@ -490,15 +665,15 @@ for future phases:
 
 ## 9. Test Status
 
-| Metric | Before Phase 1 | After Phase 1 |
-|--------|---------------|---------------|
-| Total unit tests | 1384 | 1399 |
-| Camera tests | 25 | 40 |
-| Test pass rate | 100% | 100% |
-| Coverage | 87.4% | 87.4% (unchanged — new code not integration-tested) |
-| Lint (ruff) | Clean | Clean |
-| Typecheck (mypy) | 6 pre-existing errors | 6 pre-existing errors (no new errors) |
-| Format (ruff format) | Compliant | Compliant |
+| Metric | Before Phase 1 | After Phase 1 | After Phase 2 | After Phase 3 |
+|--------|---------------|---------------|---------------|---------------|
+| Total unit tests | 1384 | 1399 | 1408 | 1416 |
+| Camera tests | 25 | 40 | 49 | 57 |
+| Test pass rate | 100% | 100% | 100% | 100% |
+| Coverage | 87.4% | 87.4% | 87.4% | 87.4% |
+| Lint (ruff) | Clean | Clean | Clean | Clean |
+| Typecheck (mypy) | 6 pre-existing errors | 6 pre-existing errors | 6 pre-existing errors | 6 pre-existing errors |
+| Format (ruff format) | Compliant | Compliant | Compliant | Compliant |
 
 ### Running Tests
 

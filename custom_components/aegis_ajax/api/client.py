@@ -271,3 +271,35 @@ class AjaxGrpcClient:
             response_deserializer=response_type.FromString,
         )
         return method(request, metadata=metadata, timeout=timeout)
+
+    async def call_bidi_stream(
+        self,
+        method_path: str,
+        response_type: Any,  # noqa: ANN401
+        timeout: float | None = None,
+    ) -> grpc.aio.StreamStreamCall:
+        """Open a bidirectional streaming RPC.
+
+        Returns a ``grpc.aio.StreamStreamCall`` that supports manual
+        ``write()`` / ``read()`` for request/response exchange.
+        The caller is responsible for closing the call when done.
+        """
+        await self._check_rate_limit()
+        channel = self._get_channel()
+        metadata = self._session.get_call_metadata()
+
+        method = channel.stream_stream(
+            method_path,
+            request_serializer=response_type.SerializeToString,  # type: ignore[attr-defined]
+            response_deserializer=response_type.FromString,  # type: ignore[attr-defined]
+        )
+        # Start the RPC without sending any requests yet; we will write
+        # them manually via the returned call object.
+        async def _empty_iterator() -> Any:  # noqa: ANN401
+            while False:
+                yield None  # pragma: no cover
+
+        call = method(_empty_iterator(), metadata=metadata, timeout=timeout)
+        # ``call`` is an async iterator, but for bidirectional control we
+        # rely on the ``StreamStreamCall`` interface (``write``/``read``).
+        return call  # type: ignore[return-value]
