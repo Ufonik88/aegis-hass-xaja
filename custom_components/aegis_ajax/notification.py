@@ -527,13 +527,17 @@ class AjaxNotificationListener:
             event_info = self._extract_event_from_proto(raw)
             if event_info:
                 event_type, event_data = event_info
-                # Enrich with source device info (name, room, type). For
-                # group-level events the source is a SpaceNotificationSource
-                # carrying the group_id; extract that too so the per-group
-                # alarm panel can be updated (#148).
+                # Enrich with source device info. Try hub source first
+                # (covers hub-attached devices), then video source
+                # (covers video-edge devices). Video source values
+                # win where both are present — video pushes carry a
+                # VideoNotificationSource with the actual camera id.
                 source_info = self._extract_source_info(raw)
                 if source_info:
                     event_data.update(source_info)
+                video_source_info = self._extract_video_source_info(raw)
+                if video_source_info:
+                    event_data.update(video_source_info)
                 if event_data.get("raw_tag") in RAW_TAG_TO_GROUP_SECURITY_STATE:
                     # Ajax actually encodes the group context in
                     # `additional_data.space_display_groups` as a
@@ -810,6 +814,72 @@ class AjaxNotificationListener:
                 except Exception:
                     continue
         return {}
+
+    @staticmethod
+    def _extract_video_source_info(raw: bytes) -> dict[str, Any]:
+        """Extract video device source information from raw protobuf bytes.
+
+        Scans for ``VideoNotificationSource`` embedded in
+        ``VideoNotificationContent``. The source carries the video edge's
+        id, name, room, and hardware type — distinct from the hub-level
+        ``HubNotificationSource`` found by ``_extract_source_info``.
+        Uses the same field-1 varint scan strategy.
+        """
+        try:
+            from systems.ajax.api.ecosystem.v2.communicationsvc.mobile.commonmodels.notification.video import (  # noqa: PLC0415, E501
+                source_pb2 as video_source_pb2,
+            )
+            from systems.ajax.api.ecosystem.v2.communicationsvc.mobile.commonmodels.notification.video import (  # noqa: E501
+                source_type_pb2 as video_source_type_pb2,
+            )
+            from systems.ajax.api.ecosystem.v2.communicationsvc.mobile.commonmodels.notification.video import (  # noqa: E501
+                video_edge_type_pb2,
+            )
+        except ImportError:
+            _LOGGER.debug("Video source proto not available")
+            return {}
+
+        source_type_enum = video_source_type_pb2.VideoNotificationSourceType.DESCRIPTOR
+        type_name_map = {v.number: v.name for v in source_type_enum.values}
+        edge_type_enum = video_edge_type_pb2.VideoEdgeType.DESCRIPTOR
+        edge_type_name_map = {v.number: v.name for v in edge_type_enum.values}
+
+        best: dict[str, Any] | None = None
+        best_keys = 0
+
+        for i in range(len(raw) - 5):
+            if raw[i] != 0x08:
+                continue
+            for end in range(i + 10, min(i + 120, len(raw) + 1)):
+                try:
+                    source = video_source_pb2.VideoNotificationSource()
+                    source.ParseFromString(raw[i:end])
+                except Exception:
+                    continue
+                if not source.id:
+                    continue
+                if source.type <= 0:
+                    continue
+                if not source.HasField("name") or not source.name:
+                    continue
+                result: dict[str, Any] = {
+                    "device_id": source.id,
+                    "device_type": type_name_map.get(source.type, str(source.type)),
+                    "device_name": source.name,
+                }
+                key_count = 3
+                if source.HasField("room_name") and source.room_name:
+                    result["room_name"] = source.room_name
+                    key_count += 1
+                if source.HasField("video_edge_type") and source.video_edge_type > 0:
+                    result["video_edge_type"] = edge_type_name_map.get(
+                        source.video_edge_type, str(source.video_edge_type)
+                    )
+                    key_count += 1
+                if best is None or key_count > best_keys:
+                    best = result
+                    best_keys = key_count
+        return best if best is not None else {}
 
     @staticmethod
     def _extract_space_source_info(raw: bytes) -> dict[str, Any]:

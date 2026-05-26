@@ -21,6 +21,7 @@ _EVENT_DESCRIPTIONS: dict[str, str] = {
     "arm": "Armed (via {device_name})",
     "arm_night": "Night mode armed (via {device_name})",
     "battery_low": "Battery low ({device_name})",
+    "car_detected": "Vehicle detected ({device_name})",
     "co_alarm": "CO alarm ({device_name})",
     "connection_lost": "Connection lost ({device_name})",
     "disarm": "Disarmed (via {device_name})",
@@ -30,9 +31,11 @@ _EVENT_DESCRIPTIONS: dict[str, str] = {
     "fire": "Fire detected ({device_name})",
     "flood": "Flood detected ({device_name})",
     "glass_break": "Glass break ({device_name})",
+    "human_detected": "Human detected ({device_name})",
     "malfunction": "Malfunction ({device_name})",
     "motion": "Motion detected ({device_name})",
     "panic": "Panic ({device_name})",
+    "pet_detected": "Pet detected ({device_name})",
     "tamper": "Tamper ({device_name})",
 }
 

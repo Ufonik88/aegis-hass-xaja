@@ -968,3 +968,68 @@ class TestAjaxCamera:
 
         assert "ha_session_7" not in cam._webrtc_sessions
         assert "ha_session_7" not in cam._webrtc_read_tasks
+
+    @pytest.mark.asyncio
+    async def test_onvif_settings_cached_on_stream_resolution(self) -> None:
+        """ONVIF settings should be cached when stream_source resolves."""
+        coordinator = MagicMock()
+        mock_device = MagicMock()
+        mock_device.id = "ve1"
+        mock_device.hub_id = "ve1"
+        coordinator.devices = {"ve1": mock_device}
+
+        mock_space = MagicMock()
+        mock_space.id = "s1"
+        mock_space.hub_id = "ve1"
+        coordinator.spaces = {"s1": mock_space}
+
+        coordinator.video_api.get_onvif_and_rtsp_settings = AsyncMock(
+            return_value=(8080, 554, ["admin"])
+        )
+
+        cam = AjaxCamera(
+            coordinator=coordinator,
+            device_id="ve1",
+            hub_id="ve1",
+            device_type="video_edge_doorbell",
+        )
+
+        assert not cam._onvif_settings_resolved
+        assert cam._onvif_port is None
+
+        result = await cam.stream_source()
+
+        assert result == "rtsp://ve1:554/stream"
+        assert cam._onvif_settings_resolved
+        assert cam._onvif_port == 8080
+        assert cam._onvif_usernames == ["admin"]
+
+    def test_extra_state_attributes_onvif(self) -> None:
+        """Camera should expose ONVIF settings in extra_state_attributes."""
+        coordinator = MagicMock()
+        cam = AjaxCamera(
+            coordinator=coordinator,
+            device_id="ve1",
+            hub_id="ve1",
+            device_type="video_edge_doorbell",
+        )
+        cam._onvif_port = 8080
+        cam._onvif_usernames = ["admin", "viewer"]
+
+        attrs = cam.extra_state_attributes
+
+        assert attrs["onvif_port"] == 8080
+        assert attrs["onvif_usernames"] == ["admin", "viewer"]
+
+    def test_extra_state_attributes_no_onvif(self) -> None:
+        """extra_state_attributes should be empty when ONVIF is not resolved."""
+        coordinator = MagicMock()
+        cam = AjaxCamera(
+            coordinator=coordinator,
+            device_id="d1",
+            hub_id="h1",
+            device_type="motion_cam",
+        )
+
+        attrs = cam.extra_state_attributes
+        assert attrs == {}

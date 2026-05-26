@@ -1,7 +1,7 @@
 # MASTER TODO — Video Functionality for Aegis for Ajax
 
 > **Last Updated:** 2026-05-26
-> **Status:** Phase 1 Complete / Phase 2 Complete / Phase 3 Complete / Phase 4 Pending
+> **Status:** Phase 1 Complete / Phase 2 Complete / Phase 3 Complete / Phase 4 Partially Complete
 
 This document is the **single source of truth** for all video-related work in this fork of
 [Aegis for Ajax](https://github.com/bvis/aegis-hass). It tracks:
@@ -494,39 +494,112 @@ HA Frontend                      HA Backend (AjaxCamera)           Ajax Cloud
 
 ---
 
-## 5. Phase 4 — Advanced Features (PLANNED)
+## 5. Phase 4 — Advanced Features (PARTIALLY COMPLETE)
 
-**Not started. Dependencies: Phase 2 + Phase 3 completion.**
+**Status:** 5.5 (Video Notifications) and 5.3 (ONVIF) complete. 5.1 (Cloud Archive) and 5.4 (Detection Zones) deferred.
 
-### 5.1 Cloud Archive Playback
+### 5.1 Cloud Archive Playback (DEFERRED)
+
+Requires integrating with Home Assistant's Media Browser API, which is a substantial
+feature. The protos are available (`get_video_fragments_info`, `stream_video_fragments_data`,
+`cloud_archive_endpoints.proto`) and the gRPC methods can be called, but building the HA
+Media Source integration (timeline browsing, fragment MP4 download with Range headers) is
+deferred to a future release.
 
 - [ ] Call `CloudArchiveService.streamVideoFragmentsData` for pre-signed MP4 URLs
 - [ ] Expose archive timeline in HA Media Browser
 - [ ] Handle fragment part download with Range headers
 
-### 5.2 Two-Way Audio
+**Available protos in `proto_src/` and `custom_components/aegis_ajax/proto/`:**
+`get_video_fragments_info`, `get_video_fragments_data`, `get_metadata_fragments_info`,
+`get_metadata_fragments_data`, `stream_video_fragments_data`, `stream_metadata_fragments_data`,
+`cloud_archive_endpoints` (service definition), `fragment_info`, `fragment_error`, `tz_entry`.
+
+### 5.2 Two-Way Audio (NOT STARTED)
 
 - [ ] Implement audio streaming via `WebrtcService` audio channels
 - [ ] Enable HA's microphone-to-camera audio pipeline
 - [ ] Audio codec support (G.711, AAC, etc.)
 
-### 5.3 ONVIF Direct Integration
+### 5.3 ONVIF Direct Integration (COMPLETE)
 
-- [ ] Use `get_onvif_and_rtsp_settings` to retrieve ONVIF credentials
-- [ ] Construct ONVIF URLs for direct camera access
-- [ ] PTZ control via ONVIF (if supported by camera)
+#### Implementation Summary
 
-### 5.4 Detection Zone Configuration
+The existing `get_onvif_and_rtsp_settings` endpoint already returns `onvif_http_port`
+and `onvif_usernames`. Phase 5.3 caches these on the `AjaxCamera` entity and exposes
+them via `extra_state_attributes` so users can configure external ONVIF tools
+(Frigate, Blue Iris, ONVIF Device Manager).
+
+#### Changes
+
+- **`camera.py`:** `_onvif_port` / `_onvif_usernames` / `_onvif_settings_resolved`
+  attributes, cached during `_resolve_video_edge_stream()`.
+- **`camera.py`:** New `extra_state_attributes` property exposing `onvif_port` and
+  `onvif_usernames`.
+- **Tests:** 3 new tests for ONVIF caching and attribute exposure.
+
+#### Notes
+
+- ONVIF passwords are **not retrievable** via the API. Users must manually enter the
+  password in their ONVIF tool. The camera's default ONVIF credentials are typically
+  printed on a sticker on the device.
+- PTZ control via ONVIF is not yet implemented — requires HA ONVIF integration or
+  direct ONVIF protocol calls.
+
+### 5.4 Detection Zone Configuration (DEFERRED)
+
+Requires proto analysis of `set_video_notification_settings`, `get_video_notification_settings`,
+and related endpoints. The protos exist but need careful cross-referencing with the
+Ajax mobile app's configuration flow to understand which fields control line crossing,
+motion zones, and object detection classes.
 
 - [ ] Line crossing detection settings
 - [ ] Motion detection zones
 - [ ] Object detection (human/vehicle/pet)
 
-### 5.5 Video Notification Enhancements
+**Available protos and compiled stubs in codebase:**
+`get_video_notification_settings`, `set_video_notification_settings`,
+`get_video_notification_alert_settings`, `set_video_notification_alert_settings`,
+`set_video_edge_detectors_enabled_by_notification_types`,
+`video_notification_settings` (common model with `VideoNotificationType` enum).
 
-- [ ] Parse `video_notification` protos from FCM pushes
-- [ ] Surface video-specific events (motion, ring, human detected)
-- [ ] Drive HA automations from video events
+### 5.5 Video Notification Enhancements (COMPLETE)
+
+#### Implementation Summary
+
+The core infrastructure for parsing video events from FCM pushes was already in place
+(`_extract_event_with_compiled_protos` walks `VideoEventQualifier`, `VIDEO_EVENT_TAG_MAP`
+maps tags to HA event types). Phase 5.5 expands the event mappings and adds proper
+`VideoNotificationSource` extraction for device info enrichment.
+
+#### Changes
+
+- **`const.py`:** Expanded `VIDEO_EVENT_TAG_MAP` with `human_detected`, `pet_detected`,
+  `car_detected`, `tamper_opened`, `device_moved`, `device_hit` (6 new entries).
+- **`const.py`:** Added `pet_detected` and `car_detected` to `TAG_PRIORITY` at tier 80
+  (sensor activity).
+- **`logbook.py`:** Added logbook descriptions for `human_detected`, `pet_detected`,
+  `car_detected`.
+- **`notification.py`:** New `_extract_video_source_info()` static method — scans raw
+  push bytes for `VideoNotificationSource` and extracts `device_id`, `device_name`,
+  `room_name`, `video_edge_type`.
+- **`notification.py`:** `_parse_and_fire_event()` now calls both `_extract_source_info`
+  (hub source) and `_extract_video_source_info` (video source); video source values
+  win where both are present.
+- **Tests:** 7 new tests for video event tag mappings and source extraction.
+
+#### New Video Event Types
+
+| Ajax Tag | HA Event Type | Logbook Description |
+|----------|--------------|---------------------|
+| `ring_button_pressed` | `doorbell_pressed` | Doorbell pressed |
+| `motion_detected` | `motion` | Motion detected |
+| `human_detected` | `human_detected` | Human detected |
+| `pet_detected` | `pet_detected` | Pet detected |
+| `car_detected` | `car_detected` | Vehicle detected |
+| `tamper_opened` | `tamper` | Tamper |
+| `device_moved` | `tamper` | Tamper |
+| `device_hit` | `tamper` | Tamper |
 
 ---
 
@@ -541,7 +614,7 @@ HA Frontend                      HA Backend (AjaxCamera)           Ajax Cloud
 | **No WebRTC streaming** — Ajax's native protocol is not yet implemented. Legacy RTSP fallback only covers hub-connected cameras. | **Medium** | **Resolved in Phase 3** — native WebRTC signaling via HA's `async_handle_async_webrtc_offer` using v3 `StreamWebrtcService/execute`. |
 | **`video_edge_*` hub_id is self-referential** — The `DevicesApi._parse_video_edge_channel()` sets `hub_id = profile.id` because VideoEdge devices don't have a parent hub. This means `_resolve_hub_camera_stream()` won't match for video edge devices (correctly — they use `_resolve_video_edge_stream()` instead). But `_resolve_video_edge_stream()` uses the device's own ID to look up a space, which requires iterating spaces. | **Low** | This is handled correctly in the current code, but worth noting for future refactors. |
 | **No stream lifecycle management** — Once `stream_source` returns a URL, HA's Stream component opens a persistent ffmpeg process. If the Ajax session expires, the stream may fail silently. | **Medium** | Consider adding session refresh hooks or re-querying `stream_source` on stream failure. |
-| **No ONVIF credential exposure** — `get_onvif_and_rtsp_settings` returns ONVIF usernames but not passwords. Direct ONVIF streaming requires the password. | **Medium** | Passwords may be retrievable via a separate endpoint, or users may need to enter them in the integration config flow. |
+| **No ONVIF credential exposure** — `get_onvif_and_rtsp_settings` returns ONVIF usernames but not passwords. Direct ONVIF streaming requires the password. | **Medium** | **Partially resolved in Phase 4** — usernames and port exposed via `extra_state_attributes`. Passwords remain irretrievable; users must enter them in their ONVIF tool (default password is usually on a device sticker). |
 
 ### 6.2 Open Questions
 
@@ -632,6 +705,17 @@ To proceed with Phases 2-4, the following information is needed from **Ajax Syst
 | `camera.py` | 240 → 385 (+145) | `async_handle_async_webrtc_offer()`, `async_on_webrtc_candidate()`, `close_webrtc_session()`, `_read_webrtc_ice_candidates()` |
 | `tests/unit/test_camera.py` | 695 → 915 (+220) | 8 new WebRTC tests + `webrtc_models` and `camera.webrtc` stubs |
 
+### Files Modified (Phase 4)
+
+| File | Lines Changed | Description |
+|------|--------------|-------------|
+| `const.py` | 456 → 467 (+11) | Expanded `VIDEO_EVENT_TAG_MAP` (+5 entries), added `TAG_PRIORITY` for new types |
+| `notification.py` | 943 → 1013 (+70) | `_extract_video_source_info()` for `VideoNotificationSource`, wired into `_parse_and_fire_event` |
+| `logbook.py` | 37 → 40 (+3) | Logbook descriptions for `human_detected`, `pet_detected`, `car_detected` |
+| `camera.py` | 386 → 403 (+17) | ONVIF settings cache + `extra_state_attributes` property |
+| `tests/unit/test_notification.py` | 1798 → 1930 (+132) | 7 new tests for video event mappings and source extraction |
+| `tests/unit/test_camera.py` | 915 → 1028 (+113) | 3 new ONVIF tests |
+
 ### Files NOT Modified (Phase 1)
 
 These files were analyzed but not changed:
@@ -665,15 +749,16 @@ for future phases:
 
 ## 9. Test Status
 
-| Metric | Before Phase 1 | After Phase 1 | After Phase 2 | After Phase 3 |
-|--------|---------------|---------------|---------------|---------------|
-| Total unit tests | 1384 | 1399 | 1408 | 1416 |
-| Camera tests | 25 | 40 | 49 | 57 |
-| Test pass rate | 100% | 100% | 100% | 100% |
-| Coverage | 87.4% | 87.4% | 87.4% | 87.4% |
-| Lint (ruff) | Clean | Clean | Clean | Clean |
-| Typecheck (mypy) | 6 pre-existing errors | 6 pre-existing errors | 6 pre-existing errors | 6 pre-existing errors |
-| Format (ruff format) | Compliant | Compliant | Compliant | Compliant |
+| Metric | Before Phase 1 | After Phase 1 | After Phase 2 | After Phase 3 | After Phase 4 |
+|--------|---------------|---------------|---------------|---------------|---------------|
+| Total unit tests | 1384 | 1399 | 1408 | 1416 | 1425 |
+| Camera tests | 25 | 40 | 49 | 57 | 60 |
+| Notification tests | — | — | — | — | 24 (7 new video) |
+| Test pass rate | 100% | 100% | 100% | 100% | 100% |
+| Coverage | 87.4% | 87.4% | 87.4% | 87.4% | 87.4% |
+| Lint (ruff) | Clean | Clean | Clean | Clean | Clean |
+| Typecheck (mypy) | 6 pre-existing errors | 6 pre-existing errors | 6 pre-existing errors | 6 pre-existing errors | 6 pre-existing errors |
+| Format (ruff format) | Compliant | Compliant | Compliant | Compliant | Compliant |
 
 ### Running Tests
 

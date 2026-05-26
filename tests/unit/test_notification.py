@@ -1431,6 +1431,138 @@ class TestExtractEventCompiledProtos:
         event_type, _ = result
         assert event_type == "motion"
 
+    def test_video_qualifier_human_detected(self) -> None:
+        from systems.ajax.api.ecosystem.v2.communicationsvc.mobile.commonmodels.event import (  # noqa: E501
+            transition_pb2,
+        )
+        from systems.ajax.api.ecosystem.v2.communicationsvc.mobile.commonmodels.event.video import (  # noqa: E501
+            qualifier_pb2 as video_qualifier_pb2,
+        )
+        from systems.ajax.api.ecosystem.v2.communicationsvc.mobile.commonmodels.event.video import (
+            tag_pb2 as video_tag_pb2,
+        )
+
+        qualifier = video_qualifier_pb2.VideoEventQualifier(
+            tag=video_tag_pb2.VideoEventTag(human_detected=video_tag_pb2.HumanDetected()),
+            transition=transition_pb2.EventTransition(
+                triggered=transition_pb2.EventTransition.Triggered()
+            ),
+        )
+        wrapped = self._wrap(qualifier.SerializeToString())
+
+        listener = self._make_listener()
+        result = listener._extract_event_with_compiled_protos(wrapped)
+
+        assert result is not None
+        event_type, _ = result
+        assert event_type == "human_detected"
+
+    def test_video_qualifier_pet_detected(self) -> None:
+        from systems.ajax.api.ecosystem.v2.communicationsvc.mobile.commonmodels.event import (  # noqa: E501
+            transition_pb2,
+        )
+        from systems.ajax.api.ecosystem.v2.communicationsvc.mobile.commonmodels.event.video import (  # noqa: E501
+            qualifier_pb2 as video_qualifier_pb2,
+        )
+        from systems.ajax.api.ecosystem.v2.communicationsvc.mobile.commonmodels.event.video import (
+            tag_pb2 as video_tag_pb2,
+        )
+
+        qualifier = video_qualifier_pb2.VideoEventQualifier(
+            tag=video_tag_pb2.VideoEventTag(pet_detected=video_tag_pb2.PetDetected()),
+            transition=transition_pb2.EventTransition(
+                triggered=transition_pb2.EventTransition.Triggered()
+            ),
+        )
+        wrapped = self._wrap(qualifier.SerializeToString())
+
+        listener = self._make_listener()
+        result = listener._extract_event_with_compiled_protos(wrapped)
+
+        assert result is not None
+        event_type, _ = result
+        assert event_type == "pet_detected"
+
+    def test_video_qualifier_car_detected(self) -> None:
+        from systems.ajax.api.ecosystem.v2.communicationsvc.mobile.commonmodels.event import (  # noqa: E501
+            transition_pb2,
+        )
+        from systems.ajax.api.ecosystem.v2.communicationsvc.mobile.commonmodels.event.video import (  # noqa: E501
+            qualifier_pb2 as video_qualifier_pb2,
+        )
+        from systems.ajax.api.ecosystem.v2.communicationsvc.mobile.commonmodels.event.video import (
+            tag_pb2 as video_tag_pb2,
+        )
+
+        qualifier = video_qualifier_pb2.VideoEventQualifier(
+            tag=video_tag_pb2.VideoEventTag(car_detected=video_tag_pb2.CarDetected()),
+            transition=transition_pb2.EventTransition(
+                triggered=transition_pb2.EventTransition.Triggered()
+            ),
+        )
+        wrapped = self._wrap(qualifier.SerializeToString())
+
+        listener = self._make_listener()
+        result = listener._extract_event_with_compiled_protos(wrapped)
+
+        assert result is not None
+        event_type, _ = result
+        assert event_type == "car_detected"
+
+    def test_extract_video_source_info_basic(self) -> None:
+        from systems.ajax.api.ecosystem.v2.communicationsvc.mobile.commonmodels.notification.video import (  # noqa: E501
+            source_pb2 as video_source_pb2,
+        )
+        from systems.ajax.api.ecosystem.v2.communicationsvc.mobile.commonmodels.notification.video import (  # noqa: E501
+            source_type_pb2 as video_source_type_pb2,
+        )
+
+        source = video_source_pb2.VideoNotificationSource(
+            type=video_source_type_pb2.VIDEO_EDGE,
+            id="ABCD1234",
+            name="Front Doorbell",
+        )
+        raw = source.SerializeToString()
+
+        listener = self._make_listener()
+        result = listener._extract_video_source_info(raw)
+
+        assert result["device_id"] == "ABCD1234"
+        assert result["device_name"] == "Front Doorbell"
+
+    def test_extract_video_source_info_with_room_and_edge_type(self) -> None:
+        from systems.ajax.api.ecosystem.v2.communicationsvc.mobile.commonmodels.notification.video import (  # noqa: E501
+            source_pb2 as video_source_pb2,
+        )
+        from systems.ajax.api.ecosystem.v2.communicationsvc.mobile.commonmodels.notification.video import (  # noqa: E501
+            source_type_pb2 as video_source_type_pb2,
+        )
+        from systems.ajax.api.ecosystem.v2.communicationsvc.mobile.commonmodels.notification.video import (  # noqa: E501
+            video_edge_type_pb2,
+        )
+
+        source = video_source_pb2.VideoNotificationSource(
+            type=video_source_type_pb2.VIDEO_EDGE,
+            id="DOOR001",
+            name="Back Doorbell",
+            room_name="Kitchen",
+            video_edge_type=video_edge_type_pb2.VIDEO_EDGE_TYPE_DOORBELL,
+        )
+        raw = source.SerializeToString()
+
+        listener = self._make_listener()
+        result = listener._extract_video_source_info(raw)
+
+        assert result["device_id"] == "DOOR001"
+        assert result["device_name"] == "Back Doorbell"
+        assert result["room_name"] == "Kitchen"
+        assert "video_edge_type" in result
+
+    def test_extract_video_source_info_none_for_non_video_bytes(self) -> None:
+        listener = self._make_listener()
+        result = listener._extract_video_source_info(b"\x00" * 50)
+        assert result == {}
+
 
 class TestParseAndFireEventLogging:
     """Push events now log `event_type / raw_tag / group_id` at DEBUG (#148).

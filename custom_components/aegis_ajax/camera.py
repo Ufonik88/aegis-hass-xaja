@@ -94,6 +94,9 @@ class AjaxCamera(CoordinatorEntity[AjaxCobrandedCoordinator], Camera):
         self._last_image: bytes | None = None
         self._stream_url: str | None = None
         self._stream_url_resolved: bool = False
+        self._onvif_port: int | None = None
+        self._onvif_usernames: list[str] | None = None
+        self._onvif_settings_resolved: bool = False
         self._webrtc_sessions: dict[str, Any] = {}
         self._webrtc_read_tasks: dict[str, asyncio.Task[None]] = {}
         device = coordinator.devices.get(device_id)
@@ -160,14 +163,28 @@ class AjaxCamera(CoordinatorEntity[AjaxCobrandedCoordinator], Camera):
         if space is None:
             return None
 
-        _, rtsp_port, _ = await coord.video_api.get_onvif_and_rtsp_settings(
+        onvif_port, rtsp_port, usernames = await coord.video_api.get_onvif_and_rtsp_settings(
             space_id=space.id,
             video_edge_id=device.id,
         )
 
+        if not self._onvif_settings_resolved:
+            self._onvif_port = onvif_port
+            self._onvif_usernames = usernames
+            self._onvif_settings_resolved = True
+
         if rtsp_port:
             return f"rtsp://{device.id}:{rtsp_port}/stream"
         return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        attrs: dict[str, Any] = {}
+        if self._onvif_port is not None:
+            attrs["onvif_port"] = self._onvif_port
+        if self._onvif_usernames:
+            attrs["onvif_usernames"] = self._onvif_usernames
+        return attrs
 
     async def async_camera_image(
         self,
