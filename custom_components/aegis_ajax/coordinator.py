@@ -25,6 +25,7 @@ from custom_components.aegis_ajax.api.models import Device as DeviceModel
 from custom_components.aegis_ajax.api.security import SecurityApi
 from custom_components.aegis_ajax.api.session import AuthenticationError
 from custom_components.aegis_ajax.api.spaces import SpacesApi
+from custom_components.aegis_ajax.api.video import VideoApi
 from custom_components.aegis_ajax.const import (
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
@@ -120,6 +121,7 @@ class AjaxCobrandedCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._devices_api = DevicesApi(client)
         self._hub_object_api = HubObjectApi(client)
         self._media_api = MediaApi(client)
+        self._video_api = VideoApi(client)
         self.spaces: dict[str, Space] = {}
         self.devices: dict[str, Device] = {}
         self.rooms: dict[str, Room] = {}
@@ -197,6 +199,10 @@ class AjaxCobrandedCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     @property
     def media_api(self) -> MediaApi:
         return self._media_api
+
+    @property
+    def video_api(self) -> VideoApi:
+        return self._video_api
 
     @property
     def notification_listener(self) -> AjaxNotificationListener | None:

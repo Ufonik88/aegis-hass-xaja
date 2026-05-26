@@ -11,17 +11,21 @@ import pytest
 
 def _stub_camera_module() -> None:
     """Stub out homeassistant.components.camera to avoid numpy dependency."""
-    if "homeassistant.components.camera" not in sys.modules:
-        camera_mod = ModuleType("homeassistant.components.camera")
+    camera_mod = ModuleType("homeassistant.components.camera")
 
-        class Camera:
-            """Minimal Camera stub."""
+    class CameraEntityFeature:
+        STREAM = 1
 
-            def __init__(self) -> None:
-                pass
+    class Camera:
+        """Minimal Camera stub."""
 
-        camera_mod.Camera = Camera  # type: ignore[attr-defined]
-        sys.modules["homeassistant.components.camera"] = camera_mod
+        EntityFeature = CameraEntityFeature
+
+        def __init__(self) -> None:
+            pass
+
+    camera_mod.Camera = Camera  # type: ignore[attr-defined]
+    sys.modules["homeassistant.components.camera"] = camera_mod
 
 
 _stub_camera_module()
@@ -46,6 +50,21 @@ class TestCameraDeviceTypes:
     def test_motion_cam_fibra_is_camera(self) -> None:
         assert "motion_cam_fibra" in CAMERA_DEVICE_TYPES
 
+    def test_video_edge_doorbell_is_camera(self) -> None:
+        assert "video_edge_doorbell" in CAMERA_DEVICE_TYPES
+
+    def test_video_edge_turret_is_camera(self) -> None:
+        assert "video_edge_turret" in CAMERA_DEVICE_TYPES
+
+    def test_video_edge_bullet_is_camera(self) -> None:
+        assert "video_edge_bullet" in CAMERA_DEVICE_TYPES
+
+    def test_video_edge_minidome_is_camera(self) -> None:
+        assert "video_edge_minidome" in CAMERA_DEVICE_TYPES
+
+    def test_video_edge_indoor_is_camera(self) -> None:
+        assert "video_edge_indoor" in CAMERA_DEVICE_TYPES
+
 
 class TestPhodDeviceTypes:
     def test_motion_cam_phod_is_phod(self) -> None:
@@ -62,6 +81,9 @@ class TestPhodDeviceTypes:
 
     def test_motion_cam_outdoor_is_not_phod(self) -> None:
         assert "motion_cam_outdoor" not in PHOD_DEVICE_TYPES
+
+    def test_video_edge_not_phod(self) -> None:
+        assert "video_edge_doorbell" not in PHOD_DEVICE_TYPES
 
     def test_phod_types_are_subset_of_camera_types(self) -> None:
         assert PHOD_DEVICE_TYPES.issubset(CAMERA_DEVICE_TYPES)
@@ -132,6 +154,32 @@ class TestAjaxCamera:
             coordinator=coordinator, device_id="d1", hub_id="h1", device_type="motion_cam"
         )
         assert cam.available is False
+
+    def test_motion_cam_has_motion_detection_disabled(self) -> None:
+        coordinator = MagicMock()
+        cam = AjaxCamera(
+            coordinator=coordinator, device_id="d1", hub_id="h1", device_type="motion_cam"
+        )
+        assert cam.motion_detection_enabled is False
+
+    def test_video_edge_has_motion_detection_enabled(self) -> None:
+        coordinator = MagicMock()
+        cam = AjaxCamera(
+            coordinator=coordinator,
+            device_id="v1",
+            hub_id="v1",
+            device_type="video_edge_doorbell",
+        )
+        assert cam.motion_detection_enabled is True
+
+    def test_supported_features_includes_stream(self) -> None:
+        coordinator = MagicMock()
+        cam = AjaxCamera(
+            coordinator=coordinator, device_id="d1", hub_id="h1", device_type="motion_cam_phod"
+        )
+        from homeassistant.components.camera import Camera
+
+        assert cam.supported_features == Camera.EntityFeature.STREAM
 
     @pytest.mark.asyncio
     async def test_async_camera_image_downloads_from_cached_url(self) -> None:
@@ -330,3 +378,149 @@ class TestAjaxCamera:
 
         result = await cam.async_camera_image()
         assert result == b"cached"
+
+    @pytest.mark.asyncio
+    async def test_stream_source_hub_camera_rtsp(self) -> None:
+        coordinator = MagicMock()
+        mock_device = MagicMock()
+        mock_device.id = "d1"
+        mock_device.hub_id = "h1"
+        mock_device.is_online = True
+        coordinator.devices = {"d1": mock_device}
+
+        mock_space = MagicMock()
+        mock_space.id = "s1"
+        mock_space.hub_id = "h1"
+        coordinator.spaces = {"s1": mock_space}
+
+        coordinator.video_api.get_surveillance_camera_stream_url = AsyncMock(
+            return_value="rtsp://192.168.1.100:554/stream"
+        )
+
+        cam = AjaxCamera(
+            coordinator=coordinator, device_id="d1", hub_id="h1", device_type="motion_cam"
+        )
+
+        result = await cam.stream_source()
+        assert result == "rtsp://192.168.1.100:554/stream"
+        coordinator.video_api.get_surveillance_camera_stream_url.assert_called_once_with(
+            hub_hex_id="h1", camera_hex_id="d1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_stream_source_hub_camera_no_url(self) -> None:
+        coordinator = MagicMock()
+        mock_device = MagicMock()
+        mock_device.id = "d1"
+        mock_device.hub_id = "h1"
+        coordinator.devices = {"d1": mock_device}
+
+        mock_space = MagicMock()
+        mock_space.id = "s1"
+        mock_space.hub_id = "h1"
+        coordinator.spaces = {"s1": mock_space}
+
+        coordinator.video_api.get_surveillance_camera_stream_url = AsyncMock(return_value=None)
+
+        cam = AjaxCamera(
+            coordinator=coordinator, device_id="d1", hub_id="h1", device_type="motion_cam"
+        )
+
+        result = await cam.stream_source()
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_stream_source_video_edge_rtsp(self) -> None:
+        coordinator = MagicMock()
+        mock_device = MagicMock()
+        mock_device.id = "ve1"
+        mock_device.hub_id = "ve1"
+        coordinator.devices = {"ve1": mock_device}
+
+        mock_space = MagicMock()
+        mock_space.id = "s1"
+        mock_space.hub_id = "ve1"
+        coordinator.spaces = {"s1": mock_space}
+
+        coordinator.video_api.get_onvif_and_rtsp_settings = AsyncMock(
+            return_value=(None, 554, None)
+        )
+
+        cam = AjaxCamera(
+            coordinator=coordinator,
+            device_id="ve1",
+            hub_id="ve1",
+            device_type="video_edge_doorbell",
+        )
+
+        result = await cam.stream_source()
+        assert result == "rtsp://ve1:554/stream"
+
+    @pytest.mark.asyncio
+    async def test_stream_source_video_edge_no_rtsp_port(self) -> None:
+        coordinator = MagicMock()
+        mock_device = MagicMock()
+        mock_device.id = "ve1"
+        mock_device.hub_id = "ve1"
+        coordinator.devices = {"ve1": mock_device}
+
+        mock_space = MagicMock()
+        mock_space.id = "s1"
+        mock_space.hub_id = "ve1"
+        coordinator.spaces = {"s1": mock_space}
+
+        coordinator.video_api.get_onvif_and_rtsp_settings = AsyncMock(
+            return_value=(None, None, None)
+        )
+
+        cam = AjaxCamera(
+            coordinator=coordinator,
+            device_id="ve1",
+            hub_id="ve1",
+            device_type="video_edge_doorbell",
+        )
+
+        result = await cam.stream_source()
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_stream_source_device_missing(self) -> None:
+        coordinator = MagicMock()
+        coordinator.devices = {}
+        coordinator.spaces = {}
+
+        cam = AjaxCamera(
+            coordinator=coordinator, device_id="d1", hub_id="h1", device_type="motion_cam"
+        )
+
+        result = await cam.stream_source()
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_stream_source_cached(self) -> None:
+        coordinator = MagicMock()
+        mock_device = MagicMock()
+        mock_device.id = "d1"
+        mock_device.hub_id = "h1"
+        coordinator.devices = {"d1": mock_device}
+
+        mock_space = MagicMock()
+        mock_space.id = "s1"
+        mock_space.hub_id = "h1"
+        coordinator.spaces = {"s1": mock_space}
+
+        coordinator.video_api.get_surveillance_camera_stream_url = AsyncMock(
+            return_value="rtsp://cached"
+        )
+
+        cam = AjaxCamera(
+            coordinator=coordinator, device_id="d1", hub_id="h1", device_type="motion_cam"
+        )
+
+        first = await cam.stream_source()
+        assert first == "rtsp://cached"
+        assert coordinator.video_api.get_surveillance_camera_stream_url.call_count == 1
+
+        second = await cam.stream_source()
+        assert second == "rtsp://cached"
+        assert coordinator.video_api.get_surveillance_camera_stream_url.call_count == 1

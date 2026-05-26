@@ -17,6 +17,7 @@ from custom_components.aegis_ajax.api.session import (
     TwoFactorRequiredError,
 )
 from custom_components.aegis_ajax.api.spaces import SpacesApi
+from custom_components.aegis_ajax.api.video import VideoApi
 
 __all__ = [
     "AjaxGrpcClient",
@@ -31,4 +32,5 @@ __all__ = [
     "Space",
     "SpacesApi",
     "TwoFactorRequiredError",
+    "VideoApi",
 ]
