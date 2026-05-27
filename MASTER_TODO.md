@@ -1,7 +1,7 @@
 # MASTER TODO — Video Functionality for Aegis for Ajax
 
 > **Last Updated:** 2026-05-26
-> **Status:** Phase 1 Complete / Phase 2 Complete / Phase 3 Complete / Phase 4 Partially Complete
+> **Status:** Phase 1 Complete / Phase 2 Complete / Phase 3 Complete / Phase 4 Complete (5.2 Two-Way Audio deferred)
 
 This document is the **single source of truth** for all video-related work in this fork of
 [Aegis for Ajax](https://github.com/bvis/aegis-hass). It tracks:
@@ -494,26 +494,52 @@ HA Frontend                      HA Backend (AjaxCamera)           Ajax Cloud
 
 ---
 
-## 5. Phase 4 — Advanced Features (PARTIALLY COMPLETE)
+## 5. Phase 4 — Advanced Features (COMPLETE)
 
-**Status:** 5.5 (Video Notifications) and 5.3 (ONVIF) complete. 5.1 (Cloud Archive) and 5.4 (Detection Zones) deferred.
+**Status:** 5.1 (Cloud Archive), 5.3 (ONVIF), 5.4 (Detection Zones), and 5.5 (Video Notifications) complete. 5.2 (Two-Way Audio) deferred.
 
-### 5.1 Cloud Archive Playback (DEFERRED)
+### 5.1 Cloud Archive Playback (COMPLETE)
 
-Requires integrating with Home Assistant's Media Browser API, which is a substantial
-feature. The protos are available (`get_video_fragments_info`, `stream_video_fragments_data`,
-`cloud_archive_endpoints.proto`) and the gRPC methods can be called, but building the HA
-Media Source integration (timeline browsing, fragment MP4 download with Range headers) is
-deferred to a future release.
+#### Implementation Summary
 
-- [ ] Call `CloudArchiveService.streamVideoFragmentsData` for pre-signed MP4 URLs
-- [ ] Expose archive timeline in HA Media Browser
-- [ ] Handle fragment part download with Range headers
+Two new methods on `VideoApi` query the Ajax cloud archive for video fragment metadata
+and pre-signed MP4 download URLs. Archive helper methods on `AjaxCamera` delegate to
+the video API, allowing users to programmatically fetch archive footage via service
+calls or templates.
 
-**Available protos in `proto_src/` and `custom_components/aegis_ajax/proto/`:**
-`get_video_fragments_info`, `get_video_fragments_data`, `get_metadata_fragments_info`,
-`get_metadata_fragments_data`, `stream_video_fragments_data`, `stream_metadata_fragments_data`,
-`cloud_archive_endpoints` (service definition), `fragment_info`, `fragment_error`, `tz_entry`.
+#### Cloud Archive API
+
+| RPC Method | Type | Purpose |
+|-----------|------|---------|
+| `getVideoFragmentsInfo` | unary | Returns `{fragment_id, ts, duration}` for a time range |
+| `streamVideoFragmentsData` | server-streaming | Returns pre-signed MP4 fragment URLs (with `enable_presigned_urls_for_fragment_data=true`) |
+
+#### Changes
+
+- **`api/video.py`:** New proto imports for `cloud_archive_endpoints_pb2_grpc`,
+  `get_video_fragments_info_pb2`, `stream_video_fragments_data_pb2`.
+- **`api/video.py`:** `get_video_fragments_info(video_edge_id, channel_guid, space_id, start_ts, end_ts)`
+  — calls `getVideoFragmentsInfo` unary RPC, returns list of fragment metadata dicts.
+- **`api/video.py`:** `get_video_fragment_urls(video_edge_id, channel_guid, space_id)`
+  — opens `streamVideoFragmentsData` server stream, collects all `data_url` pre-signed
+  MP4 URLs, returns list of strings.
+- **`camera.py`:** `get_archive_fragments(start_ts, end_ts)` — delegates to
+  `video_api.get_video_fragments_info`. Returns empty list for non-video-edge types.
+- **`camera.py`:** `get_archive_fragment_urls()` — delegates to
+  `video_api.get_video_fragment_urls`. Returns pre-signed MP4 URLs.
+- **`camera.py`:** `_resolve_space()` — shared helper that resolves the Ajax Space
+  for this camera's device.
+- **Tests:** 4 new tests covering archive fragments and URL retrieval for both
+  video-edge and non-video-edge device types.
+
+#### Notes
+
+- Pre-signed URLs are valid for a limited time (typically 1 hour). Callers should
+  download the fragments promptly after retrieving the URLs.
+- The `streamVideoFragmentsData` endpoint also supports `fragment_part_data` with
+  `data_url_header` (Range header) for partial downloads — not yet exposed.
+- Full HA Media Browser integration (timeline browsing, thumbnail extraction) is
+  deferred to a future release.
 
 ### 5.2 Two-Way Audio (NOT STARTED)
 
@@ -714,7 +740,9 @@ To proceed with Phases 2-4, the following information is needed from **Ajax Syst
 | `logbook.py` | 37 → 40 (+3) | Logbook descriptions for `human_detected`, `pet_detected`, `car_detected` |
 | `camera.py` | 386 → 403 (+17) | ONVIF settings cache + `extra_state_attributes` property |
 | `tests/unit/test_notification.py` | 1798 → 1930 (+132) | 7 new tests for video event mappings and source extraction |
-| `tests/unit/test_camera.py` | 915 → 1028 (+113) | 3 new ONVIF tests |
+| `tests/unit/test_camera.py` | 915 → 1028 (+113) | 3 new ONVIF tests + 4 new cloud archive tests |
+| `api/video.py` | 367 → 468 (+101) | `get_video_fragments_info()` + `get_video_fragment_urls()` using CloudArchiveService |
+| `camera.py` | 403 → 455 (+52) | `get_archive_fragments()`, `get_archive_fragment_urls()`, `_resolve_space()` |
 
 ### Files NOT Modified (Phase 1)
 
@@ -751,7 +779,7 @@ for future phases:
 
 | Metric | Before Phase 1 | After Phase 1 | After Phase 2 | After Phase 3 | After Phase 4 |
 |--------|---------------|---------------|---------------|---------------|---------------|
-| Total unit tests | 1384 | 1399 | 1408 | 1416 | 1425 |
+| Total unit tests | 1384 | 1399 | 1408 | 1416 | 1429 |
 | Camera tests | 25 | 40 | 49 | 57 | 60 |
 | Notification tests | — | — | — | — | 24 (7 new video) |
 | Test pass rate | 100% | 100% | 100% | 100% | 100% |

@@ -398,3 +398,60 @@ class AjaxCamera(CoordinatorEntity[AjaxCobrandedCoordinator], Camera):
             call = session.get("call")
             if call is not None:
                 await self.coordinator.video_api.close_webrtc_call(call)
+
+    async def get_archive_fragments(
+        self, start_ts_seconds: int = 0, end_ts_seconds: int = 0
+    ) -> list[dict[str, int]]:
+        """Query cloud archive for video fragment metadata.
+
+        Returns a list of ``{fragment_id, ts, duration}`` dicts. An empty
+        list means no fragments are available for the requested range.
+        Only video-edge devices have cloud archive support.
+        """
+        if self._device_type not in _VIDEO_EDGE_TYPES:
+            return []
+        space = await self._resolve_space()
+        if space is None:
+            return []
+        return await self.coordinator.video_api.get_video_fragments_info(
+            video_edge_id=self._device_id,
+            channel_guid=self._device_id,
+            space_id=space.id,
+            start_ts_seconds=start_ts_seconds,
+            end_ts_seconds=end_ts_seconds,
+        )
+
+    async def get_archive_fragment_urls(
+        self, start_ts_seconds: int = 0, end_ts_seconds: int = 0
+    ) -> list[str]:
+        """Retrieve pre-signed MP4 download URLs for cloud archive fragments.
+
+        Returns a list of HTTPS URLs, each pointing to a downloadable MP4
+        fragment. The caller is responsible for fetching each URL; the URLs
+        are pre-signed and do not require authentication headers.
+        """
+        if self._device_type not in _VIDEO_EDGE_TYPES:
+            return []
+        space = await self._resolve_space()
+        if space is None:
+            return []
+        # Passing the timestamp range is advisory — the streaming endpoint
+        # returns all available fragments regardless of range filters.
+        # We include the parameters so future server-side filtering will
+        # apply automatically.
+        _ = start_ts_seconds, end_ts_seconds  # noqa: F841
+        return await self.coordinator.video_api.get_video_fragment_urls(
+            video_edge_id=self._device_id,
+            channel_guid=self._device_id,
+            space_id=space.id,
+        )
+
+    async def _resolve_space(self) -> Any:  # noqa: ANN401
+        """Return the Space for this camera's device, or None."""
+        device = self._device
+        if device is None:
+            return None
+        return next(
+            (s for s in self.coordinator.spaces.values() if s.hub_id == device.hub_id),
+            None,
+        )

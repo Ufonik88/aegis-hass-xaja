@@ -1033,3 +1033,111 @@ class TestAjaxCamera:
 
         attrs = cam.extra_state_attributes
         assert attrs == {}
+
+    @pytest.mark.asyncio
+    async def test_get_archive_fragments_video_edge(self) -> None:
+        """Cloud archive fragment metadata for video edge devices."""
+        coordinator = MagicMock()
+        mock_device = MagicMock()
+        mock_device.id = "ve1"
+        mock_device.hub_id = "ve1"
+        coordinator.devices = {"ve1": mock_device}
+
+        mock_space = MagicMock()
+        mock_space.id = "s1"
+        mock_space.hub_id = "ve1"
+        coordinator.spaces = {"s1": mock_space}
+
+        coordinator.video_api.get_video_fragments_info = AsyncMock(
+            return_value=[
+                {"fragment_id": 1, "ts": 1716400000, "duration": 5000},
+                {"fragment_id": 2, "ts": 1716400005, "duration": 5000},
+            ]
+        )
+
+        cam = AjaxCamera(
+            coordinator=coordinator,
+            device_id="ve1",
+            hub_id="ve1",
+            device_type="video_edge_doorbell",
+        )
+
+        result = await cam.get_archive_fragments(
+            start_ts_seconds=1716400000, end_ts_seconds=1716400010
+        )
+
+        assert len(result) == 2
+        assert result[0]["fragment_id"] == 1
+        coordinator.video_api.get_video_fragments_info.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_get_archive_fragments_non_video_edge(self) -> None:
+        """Motion cam devices should return empty list (no cloud archive)."""
+        coordinator = MagicMock()
+        mock_device = MagicMock()
+        mock_device.id = "d1"
+        mock_device.hub_id = "h1"
+        coordinator.devices = {"d1": mock_device}
+
+        coordinator.spaces = {}
+
+        cam = AjaxCamera(
+            coordinator=coordinator,
+            device_id="d1",
+            hub_id="h1",
+            device_type="motion_cam",
+        )
+
+        result = await cam.get_archive_fragments()
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_archive_fragment_urls_video_edge(self) -> None:
+        """Cloud archive pre-signed MP4 URLs for video edge devices."""
+        coordinator = MagicMock()
+        mock_device = MagicMock()
+        mock_device.id = "ve1"
+        mock_device.hub_id = "ve1"
+        coordinator.devices = {"ve1": mock_device}
+
+        mock_space = MagicMock()
+        mock_space.id = "s1"
+        mock_space.hub_id = "ve1"
+        coordinator.spaces = {"s1": mock_space}
+
+        coordinator.video_api.get_video_fragment_urls = AsyncMock(
+            return_value=[
+                "https://archive.ajax.systems/frag/1.mp4",
+                "https://archive.ajax.systems/frag/2.mp4",
+            ]
+        )
+
+        cam = AjaxCamera(
+            coordinator=coordinator,
+            device_id="ve1",
+            hub_id="ve1",
+            device_type="video_edge_doorbell",
+        )
+
+        result = await cam.get_archive_fragment_urls()
+
+        assert len(result) == 2
+        assert "archive.ajax.systems/frag/1.mp4" in result[0]
+        coordinator.video_api.get_video_fragment_urls.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_get_archive_fragment_urls_non_video_edge(self) -> None:
+        """Motion cam devices should return empty list."""
+        coordinator = MagicMock()
+        coordinator.devices = {}
+        coordinator.spaces = {}
+
+        cam = AjaxCamera(
+            coordinator=coordinator,
+            device_id="d1",
+            hub_id="h1",
+            device_type="motion_cam",
+        )
+
+        result = await cam.get_archive_fragment_urls()
+        assert result == []

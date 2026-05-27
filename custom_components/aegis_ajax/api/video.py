@@ -43,6 +43,11 @@ from systems.ajax.api.mobile.v2.common.video.webrtc import (  # noqa: E402
 from systems.ajax.api.mobile.v2.common.video import (  # noqa: E402
     types_pb2,
 )
+from systems.ajax.api.mobile.v2.video.cloud_archive_mvp import (  # noqa: E402
+    cloud_archive_endpoints_pb2_grpc,
+    get_video_fragments_info_pb2,
+    stream_video_fragments_data_pb2,
+)
 # isort: on
 
 
@@ -363,3 +368,127 @@ class VideoApi:
                 await call.cancel()
         except Exception:
             _LOGGER.debug("Error closing WebRTC call", exc_info=True)
+
+    async def get_video_fragments_info(
+        self,
+        video_edge_id: str,
+        channel_guid: str,
+        space_id: str,
+        start_ts_seconds: int = 0,
+        end_ts_seconds: int = 0,
+        stream_type: int = 1,  # types_pb2.ST_MAIN
+    ) -> list[dict[str, int]]:
+        """Query cloud archive for video fragment metadata within a time range.
+
+        Returns a list of dicts with keys ``fragment_id``, ``ts`` (epoch seconds),
+        and ``duration`` (milliseconds). An empty list means no fragments are
+        available for the requested time range.
+        """
+        try:
+            channel = self._client._get_channel()
+            call_md = self._client._session.get_call_metadata()
+            stub = cloud_archive_endpoints_pb2_grpc.CloudArchiveServiceStub(channel)
+
+            request = get_video_fragments_info_pb2.CloudArchiveGetVideoFragmentsInfoRequest(
+                video_edge_guid=video_edge_id,
+                channel_guid=channel_guid,
+                stream_type=stream_type,
+                space_id=space_id,
+            )
+
+            from google.protobuf.timestamp_pb2 import Timestamp  # noqa: PLC0415
+
+            if start_ts_seconds > 0:
+                start_ts = Timestamp()
+                start_ts.FromSeconds(start_ts_seconds)
+                request.ts_range.min_value.CopyFrom(start_ts)
+            if end_ts_seconds > 0:
+                end_ts = Timestamp()
+                end_ts.FromSeconds(end_ts_seconds)
+                request.ts_range.max_value.CopyFrom(end_ts)
+
+            response = await stub.getVideoFragmentsInfo(
+                request, metadata=call_md, timeout=10
+            )
+
+            results: list[dict[str, int]] = []
+            for frag in response.fragments:
+                results.append({
+                    "fragment_id": frag.fragment_id,
+                    "ts": frag.ts,
+                    "duration": frag.duration,
+                })
+            return results
+
+        except Exception:
+            _LOGGER.debug(
+                "Error getting video fragments info for video_edge %s channel %s",
+                video_edge_id,
+                channel_guid,
+                exc_info=True,
+            )
+            return []
+
+    async def get_video_fragment_urls(
+        self,
+        video_edge_id: str,
+        channel_guid: str,
+        space_id: str,
+        stream_type: int = 1,  # types_pb2.ST_MAIN
+        timeout: float | None = 30,
+    ) -> list[str]:
+        """Retrieve pre-signed MP4 download URLs for cloud archive fragments.
+
+        Opens a server-streaming RPC to ``streamVideoFragmentsData`` with
+        ``enable_presigned_urls_for_fragment_data=true``. Collects every
+        ``data_url`` from the ``fragment_data`` responses and returns them
+        as a list of HTTPS URLs. Each URL points to a downloadable MP4
+        fragment.
+
+        Callers should close the stream promptly once they have the URLs
+        they need — the server continues streaming until the client
+        disconnects.
+        """
+        try:
+            request = stream_video_fragments_data_pb2.CloudArchiveStreamVideoFragmentsDataRequest(
+                video_edge_guid=video_edge_id,
+                channel_guid=channel_guid,
+                stream_type=stream_type,
+                space_id=space_id,
+                enable_presigned_urls_for_fragment_data=True,
+            )
+            stream = await self._client.call_server_stream(
+                "/systems.ajax.api.mobile.v2.video.cloud_archive_mvp.CloudArchiveService/streamVideoFragmentsData",
+                request,
+                stream_video_fragments_data_pb2.CloudArchiveStreamVideoFragmentsDataResponse,
+                timeout=timeout,
+            )
+
+            urls: list[str] = []
+            async for raw_response in stream:
+                which = raw_response.WhichOneof("response_union")
+                if which == "session_id":
+                    continue
+                if which == "fragment_data":
+                    fd = raw_response.fragment_data
+                    if fd.HasField("error") and fd.error.code != 0:
+                        continue
+                    if fd.data_url:
+                        urls.append(fd.data_url)
+                # fragment_part_data is for Range: header partial downloads;
+                # we only collect the full-fragment data_url for now.
+
+            _LOGGER.debug(
+                "Retrieved %d cloud archive fragment URLs for video_edge %s",
+                len(urls),
+                video_edge_id,
+            )
+            return urls
+
+        except Exception:
+            _LOGGER.debug(
+                "Error retrieving cloud archive fragment URLs for video_edge %s",
+                video_edge_id,
+                exc_info=True,
+            )
+            return []
